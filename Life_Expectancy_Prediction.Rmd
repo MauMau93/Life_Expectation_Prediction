@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Predicting Diamond Prices
+# Predicting Life Expectancy 
 
 ###Defining Colours
 ```{r}
@@ -19,8 +19,12 @@ color_3 <- "yellow"
 ```
 
 ```{r}
-library("mice")
-library("tidyverse")
+#library("mice")
+#library("tidyverse")
+#library("ggplot2")
+#library("ggcorrplot")
+#library("caret")
+library(corrplot)
 ```
 
 ### Reading Dataset
@@ -128,15 +132,64 @@ As we can see I have now 19 predictors, from which 18 are continuous and only 1 
 
 As an economist, I think that a good way to start simplifying my dataset is to divide the values of GDP/Population. This way, we get GDP per cápita, a good measure that allow us to compare in a more straighforward way the amount of production of each country per person.
 
+
+### Target Variable: Life Expectancy
+
+As said before, my purpose is to predict the life expectancy of a country. Let´s first explore this variable.
+
 ```{r}
-data <- transform(data, GDP_per_capita = GDP / Population)
-data$GDP <- NULL
-data$Population <- NULL
-dim(data)
+summary(data$Life.expectancy)
+```
+### Features (predictors)
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE, result="hide"}
+features <- setdiff(colnames(data),'data')
+numeric_features <- setdiff(colnames(data[,2:20]),'data')
+features
+```
+```{r}
+for (f in numeric_features) {
+  hist(data[,f], main=f)
+}
+```
+
+Let´s check the autocorrelation between the variables.
+```{r}
+correlation <- corrplot(cor(data[,2:20]),type="upper",method="circle",title="Correlation plot",mar=c(0.1,0.1,0.1,0.1))
+```
+As we can see, there are some variables that have a strong correlation. For exapmle, there is a perfect correlation between "under five year death" and "infant mortality". This is because they measure almost the same, but with a slight different age interval. There is also a strong correlation between "GDP" and the "percentage of expenditure". This is also logical: the richer the country, the bigger the percentage of GDP destined to the health sector.
+As "under five year death" and "infant mortality" measure almost the same thing, I will drop the first one.
+
+```{r}
+datos <- data[,-10]
+setdiff(colnames(datos),'data')
 ```
 
 
+# Modeling and Prediction
 
+First, let´s divide the training and testing set with caret.
+
+```{r}
+in_train <- createDataPartition((datos$Life.expectancy), p = 0.75, list = FALSE)  # 75% for training
+training <- data[ in_train,]
+testing <- data[-in_train,]
+nrow(training)
+nrow(testing)
+```
+Let´s explore the traning and testing set to be sure there is no huge bias in any of them.
+
+```{r}
+corr_life <- sort(cor(training[,2:19])["Life.expectancy",], decreasing = T)
+corr=data.frame(corr_life)
+ggplot(corr,aes(x = row.names(corr), y = corr_life)) + 
+  geom_bar(stat = "identity", fill = "lightblue") + 
+  scale_x_discrete(limits= row.names(corr)) +
+  labs(x = "Predictors", y = "Life Expectancy", title = "Correlations") + 
+  theme(plot.title = element_text(hjust = 0, size = rel(1.5)),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+As we can see, the variable that has the strongest correlation is the income composition of resources, followed by BMI, and GDP. On the other hand, there are some variables that hold a strong negative correlation with our target, such as Adult mortality (logicaly), HIV (also logicaly) and other variables that are defined by illnesses that may cause death. The only variable that apparently has no correlation with life expectancy is "Population". Nevertheless, correlation does not necesarily imply causality, so we can not yet asses which of these predictors helps us best to predict life expectancy in a country.
 
 
 
