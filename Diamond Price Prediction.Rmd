@@ -1,0 +1,59 @@
+---
+title: "Advanced Regression and Prediction"
+author: "Mauricio Marcos Fajgenbaun"
+date: "7/5/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Predicting Diamond Prices
+
+###Defining Colours
+```{r}
+color_1 <- "blue"
+color_2 <- "red"
+color_3 <- "yellow"
+```
+
+### Reading Dataset
+
+```{r}
+data <- read.csv("life_expect.csv")
+dim(data)
+head(data)
+```
+As we can see, we have a total of 22 variables (21 independent features and 1 output). As my intention is to predict the life expectancy of a country, given the values of some other characteristics of the country, I will drop the variables that account for the name of the country and the year the meassures were taken. This is because, again, it will not add any important information to the analysis (maybe for other analysis, it would be useful)
+
+
+# Data Preprocessing
+
+As explained before, let´s first drop the first and second column of the data frame.
+
+```{r}
+data <- data[,3:22]
+dim(data)
+head(data)
+```
+
+### Missing Values
+
+We have to check if there are any missing values in our data.
+```{r}
+n_miss <- apply(is.na(data),1,sum)
+table(n_miss)
+```
+As we can see, we have no missing value in our dataset. So we can continue with the exploration. 
+
+```{r}
+lapply(data,class)
+```
+
+
+
+
+
+
+
