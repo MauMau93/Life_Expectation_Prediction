@@ -18,6 +18,11 @@ color_2 <- "red"
 color_3 <- "yellow"
 ```
 
+```{r}
+library("mice")
+library("tidyverse")
+```
+
 ### Reading Dataset
 
 ```{r}
@@ -30,25 +35,105 @@ As we can see, we have a total of 22 variables (21 independent features and 1 ou
 
 # Data Preprocessing
 
-As explained before, let´s first drop the first and second column of the data frame.
+```{r}
+summary(data)
+```
 
+
+As we can see, we have a lot of missing value in our dataset. We get some variables, such as population with over 652 missing values! That is plenty. Also, there are some variables that have some values equal to zero. As this is a dataset taken from the WHO, we will consider that the zeros are not a mistake, but specific cases of countries where they registered that specific measure.
+
+
+
+```{r}
+data$Year <- as.factor(data$Year)
+sum(apply(data, 1, anyNA))
+```
+
+As we can see, there are 1289 rows being affected by Nans. This is a huge problem, as it is almost 30% of ours rows, meaning that it is not a good idea to drop so much information. 
+
+First, I will fill the missing values of every country, with the same information as the past (or next) year from the same country. This way, there will be consistency in eachs countries measures.
+
+
+```{r}
+data <- data %>%
+  dplyr::group_by(Country) %>%
+  fill(Population,GDP,Life.expectancy,Schooling,Income.composition.of.resources,thinness..1.19.years,thinness.5.9.years,Total.expenditure,Hepatitis.B,BMI,Alcohol,Adult.Mortality, .direction = "downup") %>%
+  dplyr::ungroup()
+```
+
+```{r}
+sum(apply(data, 1, anyNA))
+```
+We have fixed some missing values. Nevertheless, we still have 818 rows with some of them. It is easy to tell that the biggest problems are with the variables Population and GDP. Let´s see what countries have no information whatsoever regarding their population and drop them.
+
+```{r}
+bygroup <- aggregate(Population ~ Country, data=data, function(x) {sum(is.na(x))}, na.action = NULL)
+```
+
+```{r}
+bob <- bygroup$Country[bygroup$Population ==16]
+bob
+```
+When taking a closer look, we can see that most of the missing values in our dataset come from these countries in the list. So I decide to take them out.
+
+```{r}
+data <- filter(data, !Country %in% bob)
+summary(data)
+dim(data)
+sum(apply(data, 1, anyNA))
+```
+As we can see, now we only have 178 missing values. We have lost some information by deleting so many rows, but we still have 2298 rows. Now we can do an imputation with the library "mice".
+
+```{r}
+data <- mice(data,m=1,method="cart")
+data <- complete(data)
+attach(data)
+```
+
+Now, we don´t have any more missing values, we can keep on working with our dataset.
+
+
+As explained before, let´s first drop the first and second column of the data frame.
 ```{r}
 data <- data[,3:22]
 dim(data)
 head(data)
 ```
 
-### Missing Values
-
-We have to check if there are any missing values in our data.
 ```{r}
-n_miss <- apply(is.na(data),1,sum)
-table(n_miss)
-```
-As we can see, we have no missing value in our dataset. So we can continue with the exploration. 
-
-```{r}
+summary(data)
 lapply(data,class)
+```
+As we can see I have now 19 predictors, from which 18 are continuous and only 1 is categorical. Here is an explanation of them:
+
+1) Status
+2) Life Expectancy
+3) Adult Mortality
+4) Infant Deaths
+5) Alcohol
+6) Percentage Expenditure
+7) Hepatitis B
+8) Measles
+9) BMI
+10) Under 5 deaths
+11) Polio
+12) Total Expenditure
+13) Diphteria
+14) HIV
+15) GDP
+16) Population
+17) Thinness 5-9 years
+18) Thinness 1-5 years
+19) Income Composition of Resources
+20) Schooling
+
+As an economist, I think that a good way to start simplifying my dataset is to divide the values of GDP/Population. This way, we get GDP per cápita, a good measure that allow us to compare in a more straighforward way the amount of production of each country per person.
+
+```{r}
+data <- transform(data, GDP/capita = GDP / Population)
+data$GDP <- NULL
+data$Population <- NULL
+dim(data)
 ```
 
 
