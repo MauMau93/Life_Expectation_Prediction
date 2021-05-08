@@ -71,13 +71,13 @@ bygroup <- aggregate(Population ~ Country, data=data, function(x) {sum(is.na(x))
 ```
 
 ```{r}
-bob <- bygroup$Country[bygroup$Population ==16]
-bob
+no_info <- bygroup$Country[bygroup$Population ==16]
+no_info
 ```
 When taking a closer look, we can see that most of the missing values in our dataset come from these countries in the list. So I decide to take them out.
 
 ```{r}
-data <- filter(data, !Country %in% bob)
+data <- filter(data, !Country %in% no_info)
 summary(data)
 dim(data)
 sum(apply(data, 1, anyNA))
@@ -102,7 +102,6 @@ head(data)
 
 ```{r}
 summary(data)
-lapply(data,class)
 ```
 As we can see I have now 19 predictors, from which 18 are continuous and only 1 is categorical. Here is an explanation of them:
 
@@ -130,7 +129,7 @@ As we can see I have now 19 predictors, from which 18 are continuous and only 1 
 As an economist, I think that a good way to start simplifying my dataset is to divide the values of GDP/Population. This way, we get GDP per cápita, a good measure that allow us to compare in a more straighforward way the amount of production of each country per person.
 
 ```{r}
-data <- transform(data, GDP/capita = GDP / Population)
+data <- transform(data, GDP_per_capita = GDP / Population)
 data$GDP <- NULL
 data$Population <- NULL
 dim(data)
