@@ -99,13 +99,13 @@ Now, we don´t have any more missing values, we can keep on working with our dat
 
 As explained before, let´s first drop the first and second column of the data frame.
 ```{r}
-data <- data[,3:22]
-dim(data)
-head(data)
+dato <- data[,3:22]
+dim(dato)
+head(dato)
 ```
 
 ```{r}
-summary(data)
+summary(dato)
 ```
 As we can see I have now 19 predictors, from which 18 are continuous and only 1 is categorical. Here is an explanation of them:
 
@@ -129,39 +129,48 @@ As we can see I have now 19 predictors, from which 18 are continuous and only 1 
 18) Thinness 1-5 years
 19) Income Composition of Resources
 20) Schooling
-
-As an economist, I think that a good way to start simplifying my dataset is to divide the values of GDP/Population. This way, we get GDP per cápita, a good measure that allow us to compare in a more straighforward way the amount of production of each country per person.
-
+.
 
 ### Target Variable: Life Expectancy
 
 As said before, my purpose is to predict the life expectancy of a country. Let´s first explore this variable.
 
 ```{r}
-summary(data$Life.expectancy)
+summary(dato$Life.expectancy)
 ```
+Let´s plot the target variable.
+
+```{r}
+ggplot(dato, aes(x=Life.expectancy)) + 
+ geom_histogram(aes(y=..density..), colour=color_2, fill=color_3)+
+ geom_density(alpha=0.3, fill=color_1)+
+labs(x = "Life Expectancy", y = "Density")
+```
+Here we can see that our target variable has a distribution that can be related to a normal, maybe a bit skewed (maybe a gamma distribution).
+
+
 ### Features (predictors)
 
 ```{r, echo=TRUE, warning=FALSE, message=FALSE, result="hide"}
-features <- setdiff(colnames(data),'data')
-numeric_features <- setdiff(colnames(data[,2:20]),'data')
+features <- setdiff(colnames(dato),'data')
+numeric_features <- setdiff(colnames(dato[,2:20]),'dato')
 features
 ```
 ```{r}
 for (f in numeric_features) {
-  hist(data[,f], main=f)
+  hist(dato[,f], main=f)
 }
 ```
 
 Let´s check the autocorrelation between the variables.
 ```{r}
-correlation <- corrplot(cor(data[,2:20]),type="upper",method="circle",title="Correlation plot",mar=c(0.1,0.1,0.1,0.1))
+correlation <- corrplot(cor(dato[,2:20]),type="upper",method="circle",title="Correlation plot",mar=c(0.1,0.1,0.1,0.1))
 ```
 As we can see, there are some variables that have a strong correlation. For exapmle, there is a perfect correlation between "under five year death" and "infant mortality". This is because they measure almost the same, but with a slight different age interval. There is also a strong correlation between "GDP" and the "percentage of expenditure". This is also logical: the richer the country, the bigger the percentage of GDP destined to the health sector.
 As "under five year death" and "infant mortality" measure almost the same thing, I will drop the first one.
 
 ```{r}
-datos <- data[,-10]
+datos <- dato[,-10]
 setdiff(colnames(datos),'data')
 ```
 
@@ -171,11 +180,12 @@ setdiff(colnames(datos),'data')
 First, let´s divide the training and testing set with caret.
 
 ```{r}
-in_train <- createDataPartition((datos$Life.expectancy), p = 0.75, list = FALSE)  # 75% for training
-training <- data[ in_train,]
-testing <- data[-in_train,]
+in_train <- createDataPartition((datos$Life.expectancy), p = 0.8, list = FALSE)  # 80% for training
+training <- datos[ in_train,]
+testing <- datos[-in_train,]
 nrow(training)
 nrow(testing)
+control <- trainControl(method="cv", number=10)  
 ```
 Let´s explore the traning and testing set to be sure there is no huge bias in any of them.
 
@@ -189,7 +199,169 @@ ggplot(corr,aes(x = row.names(corr), y = corr_life)) +
   theme(plot.title = element_text(hjust = 0, size = rel(1.5)),
         axis.text.x = element_text(angle = 45, hjust = 1))
 ```
-As we can see, the variable that has the strongest correlation is the income composition of resources, followed by BMI, and GDP. On the other hand, there are some variables that hold a strong negative correlation with our target, such as Adult mortality (logicaly), HIV (also logicaly) and other variables that are defined by illnesses that may cause death. The only variable that apparently has no correlation with life expectancy is "Population". Nevertheless, correlation does not necesarily imply causality, so we can not yet asses which of these predictors helps us best to predict life expectancy in a country.
+As we can see, the variable that has the strongest correlation is Schooling, income composition of resources, followed by BMI, and GDP. On the other hand, there are some variables that hold a strong negative correlation with our target, such as Adult mortality (logicaly), HIV (also logicaly) and other variables that are defined by illnesses that may cause death. The only variable that apparently has no correlation with life expectancy is "Population". Nevertheless, correlation does not necesarily imply causality, so we can not yet asses which of these predictors helps us best to predict life expectancy in a country.
+
+### Checking linear dependencies
+
+```{r}
+X_matr <- data.matrix(datos)
+comboInfo <- findLinearCombos(X_matr)
+comboInfo
+```
+There are no columns that can be expressed as linear combination of other columns. This is fundamental to later have no problems in inverting the variance-covariance matrix when performing regression.
+
+
+## Benchmark 
+
+For this project, I will use a benchmark in order to know how well or bad am I doing when bilding my predictive models. In this case, I will use the mean of the Life expectancy in the training set.
+
+```{r}
+mean(training$Life.expectancy)
+benchFit <- lm(Life.expectancy ~ 1, data=training)
+predictions <- predict(benchFit, newdata=testing)
+RMSE <- sqrt(mean((predictions - testing$Life.expectancy)^2))
+RMSE
+```
+As we can see, for our benchmark I will predict that a country will have a life expectancy equal to 68.62527 and this model has a residual mean sum of squares equal to 9.5176.
+
+# Feature Selection
+
+Let´s first see what happens when we perform a multiple linear regression, taking into account all the covariates we have, and see what is the importance of each variable.
+
+```{r}
+fit.lm <- lm(Life.expectancy ~., data=training)
+summary(fit.lm)
+lm_imp <- varImp(fit.lm, scale = F)
+lm_imp
+```
+According to this simple approach, the most important variable would be "HIV", followed by "Adult Mortality", "Schooling" and "Income Composition of Resources". This is interesting as these were the variables that showed a strong correlation with the target variable. This way, we are accounting for the largest t-values in the regression. Let´s see what happens when we are interested in lowest p-values instead:
+
+```{r}
+summary(fit.lm)
+```
+As we can see, through this approach we would say that the most important variables would be the "Development Status", "Adult Mortality", "Infant Deaths", Percentage Expenditure", "BMI", "Polio", "Diphteria", "HIV", "Income Composition of resources" and "Schooling". Between these, the lower p-values are of "Income Composition of resources", "Schooling", "HIV", "BMI" and "Adult Mortality". Results are similar to the ones obtained before, although there are some differences. Let´s take into account that our adjusted R squared is 0.837, so we are explaining big part of the variability in the dataset. 
+
+Let´s check the dignostic plots to asses if the assumptions of the model are being violated or not.
+
+```{r}
+plot(fit.lm)
+```
+As we can see in the plots, the residuals seem to be not very well centered around zero, and there is clearly some heterocedasticity (non constant variance). We can say that the lineality assumption is kind of violated here. For the most part, they seem to behave as gaussian (more or less) and there seems to be some possible outliers (although there are no points outside the red line, on the corners of the forth plot, there are some points that are close it).
+
+
+I will also run this regression through Caret Package, to be able to do a nicer comparison in the future between all predictive models.
+
+```{r}
+lm1 <- train(Life.expectancy ~ .,data=training, method='lm',
+                preProcess=c("scale","center"), trControl=control) 
+```
+
+```{r}
+test_results <- data.frame(Life.expectancy = (testing$Life.expectancy))
+test_results$lm1 <- predict(lm1, testing)
+postResample(pred = test_results$lm1,  obs = test_results$Life.expectancy)
+```
+As we can see, with this first approach and by taking into account this model with all the available covariates  our result is much better than the benchmark. Now our RMSE is 4.1424, our Mean Absolut Error is 3.14. 
+
+```{r}
+qplot(test_results$lm1, test_results$Life.expectancy) + 
+  labs(title="Linear Regression Observed VS Predicted", x="Predicted", y="Observed")  +
+  geom_abline(intercept = 0, slope = 1, colour = "blue") +
+  theme_bw()
+```
+Here we can see that there is some noise in the predictions. Even though the results seem to be fitting a linear tendency, there are some big residuals, specially in the corner.
+
+Let´s see what happens when we try again a regression with all the covariates, but instead using a general linear model, accounting for the skewness in our target variable: we will consider ir a gamma. This will give us a hint on how to deal with our target variable.
+
+```{r}
+lm2 <- train(Life.expectancy ~ .,data=training, method='glm',family="Gamma",
+                preProcess=c("scale","center"), trControl=control) 
+test_results <- data.frame(Life.expectancy = (testing$Life.expectancy))
+test_results$lm2 <- predict(lm2, testing)
+postResample(pred = test_results$lm2,  obs = test_results$Life.expectancy)
+```
+As we can see, we have to go with the normal distribution for the target variable, as when we perform a Gamma regression the results are pretty bad.
+
+### Forward Regression
+
+```{r}
+for_tune <- train(Life.expectancy ~ ., data = training, 
+                  method = "leapForward", 
+                  preProc=c('scale', 'center'),
+                  tuneGrid = expand.grid(nvmax = 4:19),
+                  trControl = control)
+for_tune
+plot(for_tune)
+```
+
+```{r}
+# which variables are selected?
+coef(for_tune$finalModel, for_tune$bestTune$nvmax)
+test_results$frw <- predict(for_tune, testing)
+postResample(pred = test_results$frw,  obs = test_results$Life.expectancy)
+```
+
+```{r}
+qplot(test_results$frw, test_results$Life.expectancy) + 
+  labs(title="Forward Regression Observed VS Predicted", x="Predicted", y="Observed") +
+  geom_abline(intercept = 0, slope = 1, colour = "blue") +
+  theme_bw()
+```
+
+### backward Regression
+
+```{r}
+back_tune <- train(Life.expectancy ~ ., data = training, 
+                   method = "leapBackward", 
+                   preProc=c('scale', 'center'),
+                   tuneGrid = expand.grid(nvmax = 4:19),
+                   trControl = control)
+back_tune
+plot(back_tune)
+```
+```{r}
+# which variables are selected?
+coef(back_tune$finalModel, back_tune$bestTune$nvmax)
+test_results$bw <- predict(back_tune, testing)
+postResample(pred = test_results$bw,  obs = test_results$Life.expectancy)
+```
+
+
+```{r}
+qplot(test_results$bw, test_results$Life.expectancy) + 
+  labs(title="Backward Regression Observed VS Predicted", x="Predicted", y="Observed")  +
+  geom_abline(intercept = 0, slope = 1, colour = "blue") +
+  theme_bw()
+```
+
+
+# some bias, very similar to lm
+
+### Stepwise regression
+
+```{r}
+step_tune <- train(Life.expectancy ~ ., data = training, 
+                   method = "leapSeq", 
+                   preProc=c('scale', 'center'),
+                   tuneGrid = expand.grid(nvmax = 4:19),
+                   trControl = control)
+plot(step_tune)
+```
+
+```{r}
+# which variables are selected?
+coef(step_tune$finalModel, step_tune$bestTune$nvmax)
+test_results$seq <- predict(step_tune, testing)
+postResample(pred = test_results$seq,  obs = test_results$Life.expectancy)
+```
+
+```{r}
+qplot(test_results$seq, test_results$Life.expectancy) + 
+  labs(title="Stepwise Regression Observed VS Predicted", x="Predicted", y="Observed") +
+  geom_abline(intercept = 0, slope = 1, colour = "blue") +
+  theme_bw()
+```
+
 
 
 
