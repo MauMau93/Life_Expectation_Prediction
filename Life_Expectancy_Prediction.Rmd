@@ -362,7 +362,97 @@ qplot(test_results$seq, test_results$Life.expectancy) +
   theme_bw()
 ```
 
+### Ridge Regression
 
+```{r}
+ridge_grid <- expand.grid(lambda = seq(0, .1, length = 20))
+ridge_tune <- train(Life.expectancy ~ ., data = training,
+                    method='ridge',
+                    preProc=c('scale','center'),
+                    tuneGrid = ridge_grid,
+                    trControl=control)
+plot(ridge_tune)
+ridge_tune$bestTune
+test_results$ridge <- predict(ridge_tune, testing)
+postResample(pred = test_results$ridge,  obs = test_results$Life.expectancy)
+```
+
+```{r}
+coef(ridge_tune$finalModel, ridge_tune$bestTune$lambda)
+```
+
+### Lasso
+
+```{r}
+lasso_grid <- expand.grid(fraction = seq(.01, 1, length = 20))
+lasso_tune <- train(Life.expectancy ~ . , data = training,
+                    method='lasso',
+                    preProc=c('scale','center'),
+                    tuneGrid = lasso_grid,
+                    trControl=control)
+plot(lasso_tune)
+lasso_tune$bestTune
+test_results$lasso <- predict(lasso_tune, testing)
+postResample(pred = test_results$lasso,  obs = test_results$Life.expectancy)
+
+```
+
+```{r}
+modelLookup('glmnet')
+elastic_grid = expand.grid(alpha = seq(0, .2, 0.01), lambda = seq(0, .1, 0.01))
+glmnet_tune <- train(Life.expectancy ~. , data = training,
+                     method='glmnet',
+                     preProc=c('scale','center'),
+                     tuneGrid = elastic_grid,
+                     trControl=control)
+plot(glmnet_tune)
+glmnet_tune$bestTune
+test_results$glmnet <- predict(glmnet_tune, testing)
+postResample(pred = test_results$glmnet,  obs = test_results$Life.expectancy)
+```
+```{r}
+coef(glmnet_tune$finalModel, glmnet_tune$bestTune$lambda)
+```
+
+### Principal Component Regression
+
+```{r}
+pcr_tune <- train(Life.expectancy ~ . , data = training,
+                  method='pcr',
+                  preProc=c('scale','center'),
+                  tuneGrid = expand.grid(ncomp = 2:8),
+                  trControl=control)
+plot(pcr_tune)
+test_results$pcr <- predict(pcr_tune, testing)
+postResample(pred = test_results$pcr,  obs = test_results$Life.expectancy)
+
+```
+### PLS
+
+```{r}
+pls_tune <- train(Life.expectancy ~ . , data = training,
+                  method='pls',
+                  preProc=c('scale','center'),
+                  tuneGrid = expand.grid(ncomp = 2:8),
+                  trControl=control)
+plot(pls_tune)
+test_results$pls <- predict(pls_tune, testing)
+postResample(pred = test_results$pls,  obs = test_results$Life.expectancy)
+```
+```{r}
+apply(test_results[-1], 2, function(x) cor(x,test_results$Life.expectancy)^2)
+apply(test_results[-1], 2, function(x) mean(abs(x - test_results$Life.expectancy)))
+```
+```{r}
+library(GGally)
+test_results %>%
+  dplyr::select(-Life.expectancy) %>%
+  ggcorr(palette = "RdBu", label = TRUE) + labs(title = "Correlations between different models")
+```
+```{r}
+test_results$comb = (test_results$lasso + test_results$ridge + test_results$pls)/3
+postResample(pred = test_results$comb,  obs = test_results$Life.expectancy)
+```
 
 
 
