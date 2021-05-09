@@ -549,6 +549,21 @@ plot(importance,top=15)
 
 As we can see, BMI seems to be now the most important variable and the most important interactions are "Adult Mortality:HIV", "BMI:Schooling". Until now, this is our best model for predicting life expectancy and accounting for the data variability. Nevertheless, it is a huge and impossible model to interpret.
 
+Let´s try also the same model but now through a general linear model, using "Gamma" family.
+
+```{r}
+modboth2 <- train(Model1, data = training, 
+                    method = "glm", family="Gamma",
+                    preProc=c('scale', 'center'),
+                    trControl = control)
+test_results$modboth2 <- predict(modboth2, testing)
+postResample(pred = test_results$modboth2,  obs = test_results$Life.expectancy)
+importance <- varImp(modboth2, scale=FALSE)
+plot(importance,top=15)
+```
+
+Now, the model has not got better. Although is fairly good, in comparison with the rest, it does not improve the one with the same variables and interaction, but assuming normality.
+
 ### Forward Regression
 
 Let´s try with other options. First let´s do forward regression with Caret.
@@ -833,12 +848,26 @@ boruta <- Boruta(Life.expectancy ~ ., data=training, doTrace=0)
 plot(boruta, cex.axis=.7, las=2, xlab="", main="Variable Importance")
 ```
 
+According to Boruta, the most important variable is HIV, followed by Adult Mortality, HDI and Alcohol.
+
+
 Comparing Models
 
 ```{r}
-mods <- resamples(list(pls =bothint, elasticnet = glmnet_tune , lasso = lasso_tune))
+mods <- resamples(list(lm =lm1, glm = lm2,glm2 = modboth2, AICstep =modboth, Elasticnet = glmnet_tune,Lasso = lasso_tune, Ridge=ridge_tune,PCR=pcr_tune,PLS=pls_tune))
 summary(mods)
 ```
+
+When compring the different achieved models, we can say that:
+
+a) Regarding R-squared: in average, the best model is glm2: the general linear model that takes a lot of interactions and variables, and uses a gamma family for the target variable. This model can explain 88% of the total variability in the dataset. When chasing a simpler model, the general linear model with gamma family is pretty good too.
+
+b) Regarding MAE: in average the best model is also glm2: as it gets in average a mean absolute error in prediction of 3.292351. When checking the minimums, the model that gets the lowest MAE is the multiple regression with a lot of interactions and variables. When looking for a more parsimonious model, we can find that general linear model with all the variables but no interaction gets to (minimum) 2.71.
+
+## Combining Models
+
+A good way of finding a better model from what has been done until now, is to combine some of them and check if by calculating the average of their predictions we get to a better result. Let´s try!
+
 
 ```{r}
 apply(test_results[-1], 2, function(x) cor(x,test_results$Life.expectancy)^2)
@@ -850,9 +879,109 @@ test_results %>%
   ggcorr(palette = "RdBu", label = TRUE) + labs(title = "Correlations between different models")
 ```
 ```{r}
-test_results$comb = (test_results$lasso + test_results$ridge + test_results$pls)/3
+test_results$comb = (test_results$modboth + test_results$modboth2   +  test_results$lm2 +test_results$forwint)/4
 postResample(pred = test_results$comb,  obs = test_results$Life.expectancy)
 ```
 
+### Prediction Intervals 
+
+Now it´s time to calculate some intervals for the predictions (different than the regular confidence interval).
+
+I will calculate these prediction intervals with my best linear model first, the one with many variables and interactions.
+
+```{r}
+modelo <- lm(Model1,training)
+predictions <- predict.lm(modelo, newdata=testing, interval="prediction", level=0.90)
+head(predictions)
+predictions=as.data.frame(predictions)
+predictions$real = (test_results$Life.expectancy)
+```
+
+```{r}
+predictions = predictions %>% mutate(out=factor(if_else(real<lwr | real>upr,1,0)))
+mean(predictions$out==1)
+```
+We can see that somewhere around 10% of the real observations lay outside of the prediction interval. Let´s check it in the plot:
+
+```{r}
+ggplot(predictions, aes(x=fit, y=real))+
+  geom_point(aes(color=out)) + theme(legend.position="none") +
+  xlim(10, 100) + ylim(10, 100)+
+  geom_ribbon(data=predictions,aes(ymin=lwr,ymax=upr),alpha=0.3) +
+  labs(title = "Prediction intervals", x = "prediction",y="real life expectancy")
+```
+As we can see, our prediction intervals are pretty good, as less than 10% (slightly) of the rel values are outside of the interval, and most of them are inside.
+
+
+
+# But what to do if we want to use a model with better prediction performance?
+# For instance, use the combination model
+# Then we cannot use the predict() function...
+
+# Final predictions:
+yhat = exp(test_results$comb)
+head(yhat) # show the prediction for 6 home prices
+hist(yhat, col="lightblue")
+# take care: asymmetric distribution
+
+y = exp(test_results$price)
+error = y-yhat
+hist(error, col="lightblue")
+# But the error is more symmetric
+
+# But we cannot use the information in the testing set to obtain the confidence intervals in the testing set
+# Hence: split the testing set in two parts, one to measure the size of the noise, and the other one to compute the CIs from that size
+
+# Let's use the first 100 homes in testing to compute the noise size
+noise = error[1:100]
+sd.noise = sd(noise)
+
+# Let's use the rest of the homes to validate the coverage
+# If noise is a normal variable, then a 90%-CI can be computed as
+lwr = yhat[101:length(yhat)] - 1.65*sd.noise
+upr = yhat[101:length(yhat)] + 1.65*sd.noise
+
+# Non-parametric way:
+lwr = yhat[101:length(yhat)] + quantile(noise,0.05, na.rm=T)
+upr = yhat[101:length(yhat)] + quantile(noise,0.95, na.rm=T)
+
+# Non-parametric way, robust against outliers, but with no confidence level:
+lwr = yhat[101:length(yhat)] + boxplot.stats(noise, coef=1.5)$stats[1]
+upr = yhat[101:length(yhat)] + boxplot.stats(noise, coef=1.5)$stats[5]
+# This is a useful approach for anomaly detection
+# points outside the intervals are outliers
+# these are extreme outliers
+lwr = yhat[101:length(yhat)] + boxplot.stats(noise, coef=3)$stats[1]
+upr = yhat[101:length(yhat)] + boxplot.stats(noise, coef=3)$stats[5]
+
+# Non-parametric way, even more robust against outliers
+lwr = yhat[101:length(yhat)] - 2.4*mad(noise) 
+upr = yhat[101:length(yhat)] + 2.4*mad(noise)
+# for normal data, sd=1.48*mad
+
+# For a symmetric distribution with zero mean, the mad is the 75th percentile of the distribution
+# That means, the following interval has confidence level 50% (if noise satisfies those assumptions):
+lwr = yhat[101:length(yhat)] - mad(noise) 
+upr = yhat[101:length(yhat)] + mad(noise)
+# it's called the probable error:  half of the values lies within the interval and half outside
+
+predictions = data.frame(real=y[101:length(y)], fit=yhat[101:length(yhat)], lwr=lwr, upr=upr)
+predictions = predictions %>% mutate(out=factor(if_else(real<lwr | real>upr,1,0)))
+
+# how many real observations are out of the intervals?
+mean(predictions$out==1)
+# the real coverage of parametric approach is around 15% and the nominal one is 10%, hence it's ok, 
+# but the intervals should be a bit wider
+
+# the real coverage of non-parametric approach is around 15% and the nominal one is 10%, hence it's ok, 
+# but the intervals should be a bit wider
+
+# the real coverage of robust approach is around 8%. Here, no nominal value
+
+ggplot(predictions, aes(x=fit, y=real))+
+  geom_point(aes(color=out)) + theme(legend.position="none") +
+  xlim(20000, 1000000) + ylim(20000, 1000000)+
+  geom_ribbon(data=predictions,aes(ymin=lwr,ymax=upr),alpha=0.3) +
+  labs(title = "Prediction intervals", x = "prediction",y="real price")
 
 
