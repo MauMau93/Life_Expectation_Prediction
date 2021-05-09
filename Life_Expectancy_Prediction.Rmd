@@ -9,7 +9,23 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Predicting Life Expectancy 
+# Predicting Life Expectancy in a Country
+
+## Introduction
+
+Even though there have been many studies undertaken in the past regarding different factors affecting life expectancy, none before have taken into account different inmunization effects and Human Development Index (HDI). Also, most of the research has not been done taking into account both different countries and different years (as in this one). Nevertheless, life expectancy is one of the most important indicators a country has, and therefore an indicator that tries to be improved with time through correct policies. This way, we have to ask ourselves what are the most important variables (thus, what are the most important directions public policy whould take) that helps us predict or understand the value of life expectancy in a Country.
+
+This variable importance is straightforward clear. Hence, this gives motivation to study the relationship of this variables with some others related to economic factors, social factors, health factors inmunization factors and mortality factors. At the same time, it is important to know what variables are not so important in explaining the life expectancy in a country. This way, countries will know where not to put there resources too.
+
+In this dataset, there is information on 193 countries that has been collected from the United Nation website. Among all categories of health-related factors only those critical factors were chosen which are more representative. It has been observed that in the past 15 years , there has been a huge development in health sector resulting in improvement of human mortality rates especially in the developing nations in comparison to the past 30 years. This is also why data has been collected from the year 2000 to 2015.
+
+
+## Goal
+
+In this project I want to find the best model to predict life expectancy in a Country. The goal is actually double: I want to predict this, but I am also interested in finding the most important variables to do this prediction. This way, there may be some very complex model that will held good results predicting, but will be very difficult to interpret. This is why sometimes I will also take into account the parsimony of the model, and not only its measures.
+
+Also, to account for how good is a model I will be taking into account the following: prediction, prediction interval, Mean Absolut Error (MAE), R squared or adjusted R squared (depending on the case, sometimes one and sometimes both) to asses how much variability will be explained by the model, and how parsimonious is the model. 
+
 
 ###Defining Colours
 ```{r}
@@ -18,14 +34,29 @@ color_2 <- "red"
 color_3 <- "yellow"
 ```
 
+### Installing Libraries
+
 ```{r}
-#library("mice")
-#library("tidyverse")
-#library("ggplot2")
-#library("ggcorrplot")
-#library("caret")
-library(corrplot)
+library("mice")
+library("tidyverse")
+library("ggplot2")
+library("ggcorrplot")
+library("caret")
+library("corrplot")
+library("FOCI")
+library("Boruta")
+library("GGally")
+library("MASS")
+library("olsrr")
+library("psych")
+library("car")
 ```
+### Setting seed
+
+```{r}
+set.seed(45052185)
+```
+
 
 ### Reading Dataset
 
@@ -34,7 +65,7 @@ data <- read.csv("life_expect.csv")
 dim(data)
 head(data)
 ```
-As we can see, we have a total of 22 variables (21 independent features and 1 output). As my intention is to predict the life expectancy of a country, given the values of some other characteristics of the country, I will drop the variables that account for the name of the country and the year the meassures were taken. This is because, again, it will not add any important information to the analysis (maybe for other analysis, it would be useful)
+As we can see, we have a total of 22 variables (columns: 21 independent features and 1 output) and 2938 rows. As my intention is to predict the life expectancy of a country, given the values of some other characteristics of the country, I will drop the variables that account for the name of the country and the year the meassures were taken. This is because, again, it will not add any important information to the analysis (maybe for other analysis, it would be useful). This will be done soon, once we have fixed the missing values.
 
 
 # Data Preprocessing
@@ -43,9 +74,7 @@ As we can see, we have a total of 22 variables (21 independent features and 1 ou
 summary(data)
 ```
 
-
 As we can see, we have a lot of missing value in our dataset. We get some variables, such as population with over 652 missing values! That is plenty. Also, there are some variables that have some values equal to zero. As this is a dataset taken from the WHO, we will consider that the zeros are not a mistake, but specific cases of countries where they registered that specific measure.
-
 
 
 ```{r}
@@ -55,7 +84,9 @@ sum(apply(data, 1, anyNA))
 
 As we can see, there are 1289 rows being affected by Nans. This is a huge problem, as it is almost 30% of ours rows, meaning that it is not a good idea to drop so much information. 
 
-First, I will fill the missing values of every country, with the same information as the past (or next) year from the same country. This way, there will be consistency in eachs countries measures.
+First, I will fill the missing values of every country, with the same information as the past (or next) year from the same country. This way, there will be consistency in eachs countries measures. This is important, as doing any other imputation with, for instance, the median or mean of the column is not a good idea. If I do this, there may be some countries that get a very ilogical value. What is more, as the countries that have many missing values are mostly very small countries (probably, the smallest in the whoele dataset) imputing in another way may cause that they will for sure get a very much larger value than they should.
+
+Let´s fill some missing values with other values from past or forward years, for the same countries:
 
 
 ```{r}
@@ -64,6 +95,8 @@ data <- data %>%
   fill(Population,GDP,Life.expectancy,Schooling,Income.composition.of.resources,thinness..1.19.years,thinness.5.9.years,Total.expenditure,Hepatitis.B,BMI,Alcohol,Adult.Mortality, .direction = "downup") %>%
   dplyr::ungroup()
 ```
+
+Let´s how many missing values are still in the dataset.
 
 ```{r}
 sum(apply(data, 1, anyNA))
@@ -74,11 +107,13 @@ We have fixed some missing values. Nevertheless, we still have 818 rows with som
 bygroup <- aggregate(Population ~ Country, data=data, function(x) {sum(is.na(x))}, na.action = NULL)
 ```
 
+Now that I grouped per countries, let´s see if there is any country that has, for example, no value at all for Population column (in any year).
+
 ```{r}
 no_info <- bygroup$Country[bygroup$Population ==16]
 no_info
 ```
-When taking a closer look, we can see that most of the missing values in our dataset come from these countries in the list. So I decide to take them out.
+There are 40 countries with no value for population whtsoever. When taking a closer look, we can see that most of the missing values in our dataset come from these countries in the list. So I decide to take them out.
 
 ```{r}
 data <- filter(data, !Country %in% no_info)
@@ -96,7 +131,6 @@ attach(data)
 
 Now, we don´t have any more missing values, we can keep on working with our dataset.
 
-
 As explained before, let´s first drop the first and second column of the data frame.
 ```{r}
 dato <- data[,3:22]
@@ -109,26 +143,26 @@ summary(dato)
 ```
 As we can see I have now 19 predictors, from which 18 are continuous and only 1 is categorical. Here is an explanation of them:
 
-1) Status
-2) Life Expectancy
-3) Adult Mortality
-4) Infant Deaths
-5) Alcohol
-6) Percentage Expenditure
-7) Hepatitis B
-8) Measles
-9) BMI
-10) Under 5 deaths
-11) Polio
-12) Total Expenditure
-13) Diphteria
-14) HIV
-15) GDP
-16) Population
-17) Thinness 5-9 years
-18) Thinness 1-5 years
-19) Income Composition of Resources
-20) Schooling
+1) Status: categorical variable (either developed or developing)
+2) Life Expectancy: target variable (continuous)
+3) Adult Mortality: Adult Mortality Rates of both sexes (probability of dying between 15 and 60 years per 1000 population)
+4) Infant Deaths: Number of Infant Deaths per 1000 population
+5) Alcohol: Alcohol, recorded per capita (15+) consumption (in litres of pure alcohol)
+6) Percentage Expenditure: Expenditure on health as a percentage of Gross Domestic Product per capita(%)
+7) Hepatitis B: Hepatitis B (HepB) immunization coverage among 1-year-olds (%)
+8) Measles: Measles - number of reported cases per 1000 population
+9) BMI: Average Body Mass Index of entire population
+10) Under 5 deaths: Number of under-five deaths per 1000 population
+11) Polio: Polio (Pol3) immunization coverage among 1-year-olds (%)
+12) Total Expenditure: General government expenditure on health as a percentage of total government expenditure (%)
+13) Diphteria: Diphtheria tetanus toxoid and pertussis (DTP3) immunization coverage among 1-year-olds (%)
+14) HIV: Deaths per 1 000 live births HIV/AIDS (0-4 years)
+15) GDP:Gross Domestic Product per capita (in USD)
+16) Population: Population of the country
+17) Thinness 5-9 years: Prevalence of thinness among children for Age 5 to 9(%)
+18) Thinness 10-19: Prevalence of thinness among children and adolescents for Age 10 to 19 (% )
+19) Income Composition of Resources: Human Development Index in terms of income composition of resources (index ranging from 0 to 1).
+20) Schooling: Number of years of Schooling, in years.
 .
 
 ### Target Variable: Life Expectancy
@@ -136,8 +170,11 @@ As we can see I have now 19 predictors, from which 18 are continuous and only 1 
 As said before, my purpose is to predict the life expectancy of a country. Let´s first explore this variable.
 
 ```{r}
-summary(dato$Life.expectancy)
+describe(dato$Life.expectancy)
 ```
+
+We can first see that from all our data set the minimum value of life expectancy is 36.30, while the maximum is 89. In average, the countries through the years have a life expectancy of 68.69. About the variability, the standrd deviation is 9.8. Its kurtosis is -0.37. This negative value means our variable has a "platykurtic" distribution, which means that it has a flatter peak and thinner tails compared to a normal distribution. This simply means that more data values are located near the mean and less data values are located on the tails. 
+
 Let´s plot the target variable.
 
 ```{r}
@@ -146,7 +183,7 @@ ggplot(dato, aes(x=Life.expectancy)) +
  geom_density(alpha=0.3, fill=color_1)+
 labs(x = "Life Expectancy", y = "Density")
 ```
-Here we can see that our target variable has a distribution that can be related to a normal, maybe a bit skewed (maybe a gamma distribution).
+Here we can see that our target variable has a distribution that can be related to a normal, but as said before with more values close to the mean and not so many in the tails (maybe a gamma distribution).
 
 
 ### Features (predictors)
@@ -154,17 +191,33 @@ Here we can see that our target variable has a distribution that can be related 
 ```{r, echo=TRUE, warning=FALSE, message=FALSE, result="hide"}
 features <- setdiff(colnames(dato),'data')
 numeric_features <- setdiff(colnames(dato[,2:20]),'dato')
-features
 ```
+
+Let´s first plot an histogram to see how their univariate distribution behaves:
+
 ```{r}
 for (f in numeric_features) {
   hist(dato[,f], main=f)
 }
 ```
 
+As we have only one categorical variable (Status) let´s see what is its relationship with our target variable.
+
+```{r}
+ggplot(dato, aes(x=Status, y=Life.expectancy, fill=Status)) + 
+    geom_boxplot()
+```
+
+As it can be seen in the plot, developed country have a larger life expectancy median, and its distribution is much more concentrated. Meaning that there is no so much variability between developed countries. It seems that the median is close to 80. On the other hand, developing countries have a less concentrated life expectancy distribution (the box is larger), having a median lower than 70. This way, we can see that there is a huge difference between developed and developing countries. This should not surprise us, as life expectancy is one of the variables to look at when assesing if a country is (or is not) a developed country.
+
+
+As I will be using CARET to model and predict my target variable, there is no need of standarization or scaling now, as the package can do it when running the algorithm.
+
+Let´s start to asses the relationship between the variables in the dataset.
+
+
 ```{r}
 options(repr.plot.width = 20, repr.plot.height = 16)
-library(GGally)
 coord <- ggparcoord(datos, columns=2:19, alphaLines=0.1, missing = 'mean',
                  groupColumn = 'Life.expectancy', scale="uniminmax") + 
 xlab("") +
@@ -174,19 +227,45 @@ coord
 
 
 Let´s check the autocorrelation between the variables.
+
 ```{r}
 correlation <- corrplot(cor(dato[,2:20]),type="upper",method="circle",title="Correlation plot",mar=c(0.1,0.1,0.1,0.1))
 ```
+
 As we can see, there are some variables that have a strong correlation. For exapmle, there is a perfect correlation between "under five year death" and "infant mortality". This is because they measure almost the same, but with a slight different age interval. There is also a strong correlation between "GDP" and the "percentage of expenditure". This is also logical: the richer the country, the bigger the percentage of GDP destined to the health sector.
-As "under five year death" and "infant mortality" measure almost the same thing, I will drop the first one.
+
+Let´s plot "infants deaths" vs. "under five deaths":
+
+```{r}
+ggplot(dato, aes(x=under.five.deaths, y=infant.deaths)) + 
+    geom_point(size=2, shape=23)+ geom_abline(intercept = 0, slope = 1, colour = "blue") 
+```
+
+Let´s see what happens when trying to calculate the VIF of a multiple regression when taking into account all the covariates (to check if the two variables will be producing multicolinearity). Here, I will perform a multiple regression but without splitting the data into training and testing set, as I do not want to predict yet but to asses for multicolinearity.
+
+```{r}
+multiple.lm <-  lm(Life.expectancy ~., data=dato)
+vif(multiple.lm)
+```
+
+As we can see, the VIF of "under five year death" and "infant mortality" are extremely high, meaning that they probably meassure almost the same thing. All together, I will drop the "under five year death" as between both of them is the one that has the less correlation with the target variable and this way, we will be avoiding multicolinearity.
+
 
 ```{r}
 datos <- dato[,-10]
 setdiff(colnames(datos),'data')
 ```
 
+### Checking linear dependencies
 
-# Modeling and Prediction
+```{r}
+X_matr <- data.matrix(datos)
+comboInfo <- findLinearCombos(X_matr)
+comboInfo
+```
+There are no columns that can be expressed as linear combination of other columns. This is fundamental to later have no problems in inverting the variance-covariance matrix when performing regression.
+
+## Modeling and Prediction
 
 First, let´s divide the training and testing set with caret.
 
@@ -198,7 +277,19 @@ nrow(training)
 nrow(testing)
 control <- trainControl(method="cv", number=10)  
 ```
+
 Let´s explore the traning and testing set to be sure there is no huge bias in any of them.
+
+```{r}
+ggplot(training, aes(x=Status, y=Life.expectancy, fill=Status)) + 
+    geom_boxplot()
+ggplot(testing, aes(x=Status, y=Life.expectancy, fill=Status)) + 
+    geom_boxplot()
+```
+
+As far as we can tell from these boxplots, the training and testing set look well balanced: among developed and developing countries and life expectancy distributions.
+
+Let´s check what are the most correlated variables with "life expectancy":
 
 ```{r}
 corr_life <- sort(cor(training[,2:19])["Life.expectancy",], decreasing = T)
@@ -212,30 +303,22 @@ ggplot(corr,aes(x = row.names(corr), y = corr_life)) +
 ```
 As we can see, the variable that has the strongest correlation is Schooling, income composition of resources, followed by BMI, and GDP. On the other hand, there are some variables that hold a strong negative correlation with our target, such as Adult mortality (logicaly), HIV (also logicaly) and other variables that are defined by illnesses that may cause death. The only variable that apparently has no correlation with life expectancy is "Population". Nevertheless, correlation does not necesarily imply causality, so we can not yet asses which of these predictors helps us best to predict life expectancy in a country.
 
-### Checking linear dependencies
-
-```{r}
-X_matr <- data.matrix(datos)
-comboInfo <- findLinearCombos(X_matr)
-comboInfo
-```
-There are no columns that can be expressed as linear combination of other columns. This is fundamental to later have no problems in inverting the variance-covariance matrix when performing regression.
-
 
 ## Benchmark 
 
-For this project, I will use a benchmark in order to know how well or bad am I doing when bilding my predictive models. In this case, I will use the mean of the Life expectancy in the training set.
+For this project, I will use a benchmark in order to know how well or bad am I doing when bilding my predictive models. In this case, I will use a multiple regression with the three more correlated variables to the target: "schooling", "income composition of resources" and "adult mortality".
 
 ```{r}
-mean(training$Life.expectancy)
-benchFit <- lm(Life.expectancy ~ 1, data=training)
+benchFit <- lm(Life.expectancy ~ Schooling + Income.composition.of.resources + Adult.Mortality, data=training)
 predictions <- predict(benchFit, newdata=testing)
-RMSE <- sqrt(mean((predictions - testing$Life.expectancy)^2))
-RMSE
+cor((testing$Life.expectancy), predictions)^2
+MAE <- mean(abs(predictions - testing$Life.expectancy))
+MAE
 ```
-As we can see, for our benchmark I will predict that a country will have a life expectancy equal to 68.62527 and this model has a residual mean sum of squares equal to 9.5176.
+As we can see, for our benchmark we get an R-square equal to 0.7734, meaning that we can explain 77,34% of the variability of the dataset, and our mean absolute error is of 3.2528.
 
-# Feature Selection
+
+## Feature Selection
 
 Let´s first see what happens when we perform a multiple linear regression, taking into account all the covariates we have, and see what is the importance of each variable.
 
@@ -265,7 +348,7 @@ cor((testing$Life.expectancy), prLM)^2
 mean(abs((testing$Life.expectancy)- prLM))
 ```
 
-
+As we can see, when taking into account all the covariates we get a better result than our benchmark. Now, we got a better R-squared, at 0.8132 and our mean absolute error has decreased from 3.2528 to 3.14. This is a good start. But from now on, I will also start paying attention to the adjusted R-squared, as I would like to penalize for the amount of variables used.
 
 I will also run this regression through Caret Package, to be able to do a nicer comparison in the future between all predictive models.
 
@@ -279,7 +362,8 @@ test_results <- data.frame(Life.expectancy = (testing$Life.expectancy))
 test_results$lm1 <- predict(lm1, testing)
 postResample(pred = test_results$lm1,  obs = test_results$Life.expectancy)
 ```
-As we can see, with this first approach and by taking into account this model with all the available covariates  our result is much better than the benchmark. Now our RMSE is 4.1424, our Mean Absolut Error is 3.14. 
+
+With CARET we have an even better model to predict, as it allows us to do some automatic transformations to the data: now by scaling and centering it. Let´s see a plot of the observed vs. the predicted values of the life expectancy in the testing set:
 
 ```{r}
 qplot(test_results$lm1, test_results$Life.expectancy) + 
@@ -289,7 +373,7 @@ qplot(test_results$lm1, test_results$Life.expectancy) +
 ```
 Here we can see that there is some noise in the predictions. Even though the results seem to be fitting a linear tendency, there are some big residuals, specially in the corner.
 
-Let´s see what happens when we try again a regression with all the covariates, but instead using a general linear model, accounting for the skewness in our target variable: we will consider ir a gamma. This will give us a hint on how to deal with our target variable.
+Let´s see what happens when we try again a regression with all the covariates, but now using a general linear model, accounting for the skewness in our target variable: we will consider ir a gamma. This will give us a hint on how to deal with our target variable.
 
 ```{r}
 lm2 <- train(Life.expectancy ~ .,data=training, method='glm',family="Gamma",
@@ -298,13 +382,13 @@ test_results <- data.frame(Life.expectancy = (testing$Life.expectancy))
 test_results$lm2 <- predict(lm2, testing)
 postResample(pred = test_results$lm2,  obs = test_results$Life.expectancy)
 ```
-As we can see, we have to go with the normal distribution for the target variable, as when we perform a Gamma regression the results are pretty bad.
+When using a gamma family for the glm, we get even a better result than when assuming a gaussian distribution for our target variable. This way, we get an R squared equal to 0.8405 (higher than 0.8384 obtained with the linear model before), a mean absolute error equal to 2.9160 (lower than the 2.9382 from before) and also a lower RMSE. Until now, this is our best model.
 
 ### Robust Regression
 
-```{r}
-library(MASS)
+Now, I will perform two different robust regressions, with all the covariates I have
 
+```{r}
 linfit.huber <- rlm(Life.expectancy ~ . , data=training)
 summary(linfit.huber)
 
@@ -488,7 +572,6 @@ apply(test_results[-1], 2, function(x) cor(x,test_results$Life.expectancy)^2)
 apply(test_results[-1], 2, function(x) mean(abs(x - test_results$Life.expectancy)))
 ```
 ```{r}
-library(GGally)
 test_results %>%
   dplyr::select(-Life.expectancy) %>%
   ggcorr(palette = "RdBu", label = TRUE) + labs(title = "Correlations between different models")
@@ -500,8 +583,6 @@ postResample(pred = test_results$comb,  obs = test_results$Life.expectancy)
 ### Model Selection
 
 ```{r}
-library(olsrr)
-
 forwardpv <- ols_step_forward_p(fit.lm) # forward based on p-value
 
 plot(ols_step_forward_p(fit.lm))
@@ -635,8 +716,6 @@ plot(importance)
 ### FOCI
 
 ```{r}
-library(FOCI)
-library(Boruta)
 y <- training$Life.expectancy
 x <- training[,3:19]
 foci(y,x)$selectedVar
