@@ -162,6 +162,17 @@ for (f in numeric_features) {
 }
 ```
 
+```{r}
+options(repr.plot.width = 20, repr.plot.height = 16)
+library(GGally)
+coord <- ggparcoord(datos, columns=2:19, alphaLines=0.1, missing = 'mean',
+                 groupColumn = 'Life.expectancy', scale="uniminmax") + 
+xlab("") +
+ylab("")
+coord
+```
+
+
 Let´s check the autocorrelation between the variables.
 ```{r}
 correlation <- corrplot(cor(dato[,2:20]),type="upper",method="circle",title="Correlation plot",mar=c(0.1,0.1,0.1,0.1))
