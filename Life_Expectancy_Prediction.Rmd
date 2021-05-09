@@ -26,6 +26,7 @@ In this project I want to find the best model to predict life expectancy in a Co
 
 Also, to account for how good is a model I will be taking into account the following: prediction, prediction interval, Mean Absolut Error (MAE), R squared or adjusted R squared (depending on the case, sometimes one and sometimes both) to asses how much variability will be explained by the model, and how parsimonious is the model. 
 
+In this project, I will first do data engeneering and pre-processing. Then I will try and find the best model, using the most important variables to get a better performance. Then I will combine the best models to try and get a better one. Finally, I will build prediction intervals for the best model and the best combination of models. I did not build prediction intervals for every model, as most of them are not used for predicting, but to choose variables and interactions.
 
 ###Defining Colours
 ```{r}
@@ -870,18 +871,11 @@ A good way of finding a better model from what has been done until now, is to co
 
 
 ```{r}
-apply(test_results[-1], 2, function(x) cor(x,test_results$Life.expectancy)^2)
-apply(test_results[-1], 2, function(x) mean(abs(x - test_results$Life.expectancy)))
-```
-```{r}
-test_results %>%
-  dplyr::select(-Life.expectancy) %>%
-  ggcorr(palette = "RdBu", label = TRUE) + labs(title = "Correlations between different models")
-```
-```{r}
 test_results$comb = (test_results$modboth + test_results$modboth2   +  test_results$lm2 +test_results$forwint)/4
 postResample(pred = test_results$comb,  obs = test_results$Life.expectancy)
 ```
+
+This is a fairly good model. The mean absolute error is one of the smallest, and is accompanied
 
 ### Prediction Intervals 
 
@@ -901,6 +895,7 @@ predictions$real = (test_results$Life.expectancy)
 predictions = predictions %>% mutate(out=factor(if_else(real<lwr | real>upr,1,0)))
 mean(predictions$out==1)
 ```
+
 We can see that somewhere around 10% of the real observations lay outside of the prediction interval. Let´s check it in the plot:
 
 ```{r}
@@ -912,76 +907,100 @@ ggplot(predictions, aes(x=fit, y=real))+
 ```
 As we can see, our prediction intervals are pretty good, as less than 10% (slightly) of the rel values are outside of the interval, and most of them are inside.
 
+Let´s see what happens when we want to build prediction intervals for the model we just created by combining different ones.
 
-
-# But what to do if we want to use a model with better prediction performance?
-# For instance, use the combination model
-# Then we cannot use the predict() function...
-
-# Final predictions:
-yhat = exp(test_results$comb)
-head(yhat) # show the prediction for 6 home prices
+```{r}
+yhat = (test_results$comb)
+head(yhat)
 hist(yhat, col="lightblue")
-# take care: asymmetric distribution
+```
+As we can see, the distribution of the predictions looks kind of like a normal distribution, although it is a bit skewed. Let´s check the error in prediction:
 
-y = exp(test_results$price)
+
+```{r}
+y = (test_results$Life.expectancy)
 error = y-yhat
 hist(error, col="lightblue")
-# But the error is more symmetric
+```
+The error distribution is a bit more asymetric than the prediction distribution, but it also looks more centered (the median is close to zero).
+Now, I am going to split the testing set in two different parts. This is due to the fact that I can not use the same testing set to get the confidence interval. This way, I will compute with one part the noise, and with the other I will obtain the intervals. As I have 459 observations in my testing set, I will use the first 180 for the noise, and the rest to build the interval.
 
-# But we cannot use the information in the testing set to obtain the confidence intervals in the testing set
-# Hence: split the testing set in two parts, one to measure the size of the noise, and the other one to compute the CIs from that size
-
-# Let's use the first 100 homes in testing to compute the noise size
-noise = error[1:100]
+```{r}
+noise = error[1:180]
 sd.noise = sd(noise)
+hist(noise)
+```
 
-# Let's use the rest of the homes to validate the coverage
-# If noise is a normal variable, then a 90%-CI can be computed as
-lwr = yhat[101:length(yhat)] - 1.65*sd.noise
-upr = yhat[101:length(yhat)] + 1.65*sd.noise
+Now, I can use the rest of the observation in the testing set to build the interval. As we can see in the histogram above, the noise behaves very similar to a normal distribution. We can check with a Shapiro-Wilk test (normality test).
 
-# Non-parametric way:
-lwr = yhat[101:length(yhat)] + quantile(noise,0.05, na.rm=T)
-upr = yhat[101:length(yhat)] + quantile(noise,0.95, na.rm=T)
+```{r}
+x.test <- shapiro.test(noise)
+x.test
+```
+As we can see, the p-value of the test is higher than 0.05, meaning that we do not reject the null hypotesis of normality at a 95% of confidence level. I can proceed to build the intervals now. As we know, when a distribution behaves like a normal, 90% of the data is supossed to be inside 1.65 standard deviations. Like follows:
 
-# Non-parametric way, robust against outliers, but with no confidence level:
-lwr = yhat[101:length(yhat)] + boxplot.stats(noise, coef=1.5)$stats[1]
-upr = yhat[101:length(yhat)] + boxplot.stats(noise, coef=1.5)$stats[5]
-# This is a useful approach for anomaly detection
-# points outside the intervals are outliers
-# these are extreme outliers
-lwr = yhat[101:length(yhat)] + boxplot.stats(noise, coef=3)$stats[1]
-upr = yhat[101:length(yhat)] + boxplot.stats(noise, coef=3)$stats[5]
 
-# Non-parametric way, even more robust against outliers
-lwr = yhat[101:length(yhat)] - 2.4*mad(noise) 
-upr = yhat[101:length(yhat)] + 2.4*mad(noise)
-# for normal data, sd=1.48*mad
+```{r}
+lwr = yhat[181:length(yhat)] - 1.65*sd.noise
+upr = yhat[181:length(yhat)] + 1.65*sd.noise
+pred <- yhat[181:length(yhat)]
+head(cbind(lwr,upr,pred))
+```
+Here we see the first intervals of each value of prediction of life expectancy of a country.
 
-# For a symmetric distribution with zero mean, the mad is the 75th percentile of the distribution
-# That means, the following interval has confidence level 50% (if noise satisfies those assumptions):
-lwr = yhat[101:length(yhat)] - mad(noise) 
-upr = yhat[101:length(yhat)] + mad(noise)
-# it's called the probable error:  half of the values lies within the interval and half outside
+Let´s do the same, now with a non-parametric way (we will get the same result):
 
-predictions = data.frame(real=y[101:length(y)], fit=yhat[101:length(yhat)], lwr=lwr, upr=upr)
-predictions = predictions %>% mutate(out=factor(if_else(real<lwr | real>upr,1,0)))
+```{r}
+lwr = yhat[181:length(yhat)] + quantile(noise,0.05, na.rm=T)
+upr = yhat[181:length(yhat)] + quantile(noise,0.95, na.rm=T)
+head(cbind(lwr,upr,pred))
+```
 
-# how many real observations are out of the intervals?
-mean(predictions$out==1)
-# the real coverage of parametric approach is around 15% and the nominal one is 10%, hence it's ok, 
-# but the intervals should be a bit wider
+Now we can check if there are any kind of anomalies (outliers), by checking first in a more conservative way, and then in a more extreme way. If there are outliers in the second plot, it means they are extreme outliers.
 
-# the real coverage of non-parametric approach is around 15% and the nominal one is 10%, hence it's ok, 
-# but the intervals should be a bit wider
 
-# the real coverage of robust approach is around 8%. Here, no nominal value
+```{r}
+lwr = yhat[181:length(yhat)] + boxplot.stats(noise, coef=1.5)$stats[1]
+upr = yhat[181:length(yhat)] + boxplot.stats(noise, coef=1.5)$stats[5]
 
-ggplot(predictions, aes(x=fit, y=real))+
+y2 <- y[181:length(y)]
+yhat2 <- yhat[181:length(yhat)]
+df <- data.frame(y2,yhat2,lwr,upr)
+head(df)
+
+
+df = df %>% mutate(out=factor(if_else(y2<lwr | y2>upr,1,0)))
+mean(df$out==1)
+```
+As we can see, only 4.6% of the predictions are outside the interval.
+
+```{r}
+ggplot(df, aes(x=yhat2, y=y2))+
   geom_point(aes(color=out)) + theme(legend.position="none") +
-  xlim(20000, 1000000) + ylim(20000, 1000000)+
+  xlim(20, 100) + ylim(20, 100)+
   geom_ribbon(data=predictions,aes(ymin=lwr,ymax=upr),alpha=0.3) +
-  labs(title = "Prediction intervals", x = "prediction",y="real price")
+  labs(title = "Prediction intervals", x = "prediction",y="real life expectancy")
+```
+
+Now, this is even more robust:
+
+```{r}
+lwr = yhat[181:length(yhat)] + boxplot.stats(noise, coef=3)$stats[1]
+upr = yhat[181:length(yhat)] + boxplot.stats(noise, coef=3)$stats[5]
+
+y2 <- y[181:length(y)]
+yhat2 <- yhat[181:length(yhat)]
+df <- data.frame(y2,yhat2,lwr,upr)
+
+df = df %>% mutate(out=factor(if_else(y2<lwr | y2>upr,1,0)))
+mean(df$out==1)
+
+ggplot(df, aes(x=yhat2, y=y2))+
+  geom_point(aes(color=out)) + theme(legend.position="none") +
+  xlim(20, 100) + ylim(20, 100)+
+  geom_ribbon(data=predictions,aes(ymin=lwr,ymax=upr),alpha=0.3) +
+  labs(title = "Prediction intervals", x = "prediction",y="real life expectancy")
+```
+Now, only 2% of the predictions are outside the interval. This is a very good interval then.
 
 
