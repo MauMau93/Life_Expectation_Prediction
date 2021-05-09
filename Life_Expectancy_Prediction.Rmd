@@ -248,6 +248,13 @@ plot(fit.lm)
 ```
 As we can see in the plots, the residuals seem to be not very well centered around zero, and there is clearly some heterocedasticity (non constant variance). We can say that the lineality assumption is kind of violated here. For the most part, they seem to behave as gaussian (more or less) and there seems to be some possible outliers (although there are no points outside the red line, on the corners of the forth plot, there are some points that are close it).
 
+```{r}
+prLM <- predict(fit.lm, newdata=testing)
+cor((testing$Life.expectancy), prLM)^2
+mean(abs((testing$Life.expectancy)- prLM))
+```
+
+
 
 I will also run this regression through Caret Package, to be able to do a nicer comparison in the future between all predictive models.
 
@@ -281,6 +288,32 @@ test_results$lm2 <- predict(lm2, testing)
 postResample(pred = test_results$lm2,  obs = test_results$Life.expectancy)
 ```
 As we can see, we have to go with the normal distribution for the target variable, as when we perform a Gamma regression the results are pretty bad.
+
+### Robust Regression
+
+```{r}
+library(MASS)
+
+linfit.huber <- rlm(Life.expectancy ~ . , data=training)
+summary(linfit.huber)
+
+linfit.bisquare <- rlm(Life.expectancy ~ . , data=training, psi = psi.bisquare)
+summary(linfit.bisquare)
+```
+Let´s see how do they predict.
+
+```{r}
+prHuber <- predict(linfit.huber, newdata=testing)
+cor((testing$Life.expectancy), prHuber)^2
+mean(abs((testing$Life.expectancy)- prHuber))
+
+prBi <- predict(linfit.bisquare, newdata=testing)
+cor((testing$Life.expectancy), prBi)^2
+mean(abs((testing$Life.expectancy)- prBi))
+
+```
+
+
 
 ### Forward Regression
 
