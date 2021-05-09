@@ -453,6 +453,165 @@ test_results %>%
 test_results$comb = (test_results$lasso + test_results$ridge + test_results$pls)/3
 postResample(pred = test_results$comb,  obs = test_results$Life.expectancy)
 ```
+### Model Selection
+
+```{r}
+library(olsrr)
+
+forwardpv <- ols_step_forward_p(fit.lm) # forward based on p-value
+
+plot(ols_step_forward_p(fit.lm))
+
+```
+
+Akaike Criterion
+
+```{r}
+ols_step_forward_aic(fit.lm) # forward based on AIC
+
+stepaicback <- ols_step_backward_aic(fit.lm) # backward AIC
+
+ols_step_both_aic(fit.lm) # stepwise AIC
+```
+
+Let´s see what happens once we add two side interactions:
+
+```{r,results=HIDE}
+forwint <- step(fit.lm, scope = . ~ .^2, direction = 'forward')
+backint <- step(fit.lm, scope = . ~ .^2, direction = 'backward')
+bothint <- step(fit.lm, scope = . ~ .^2, direction = 'both')
+```
+
+```{r}
+lm_tunefor <- train(Life.expectancy ~ Status + Adult.Mortality + infant.deaths + 
+    Alcohol + percentage.expenditure + Hepatitis.B + Measles + 
+    BMI + Polio + Total.expenditure + Diphtheria + HIV.AIDS + 
+    GDP + Population + thinness..1.19.years + thinness.5.9.years + 
+    Income.composition.of.resources + Schooling + Adult.Mortality:HIV.AIDS + 
+    thinness..1.19.years:thinness.5.9.years + percentage.expenditure:Income.composition.of.resources + 
+    BMI:Diphtheria + Income.composition.of.resources:Schooling + 
+    BMI:Schooling + Adult.Mortality:Schooling + BMI:Total.expenditure + 
+    HIV.AIDS:Income.composition.of.resources + Alcohol:thinness.5.9.years + 
+    Status:Schooling + Status:Income.composition.of.resources + 
+    Status:Adult.Mortality + Total.expenditure:HIV.AIDS + Alcohol:HIV.AIDS + 
+    Status:BMI + Status:GDP + infant.deaths:BMI + Measles:HIV.AIDS + 
+    Diphtheria:Schooling + Diphtheria:Income.composition.of.resources + 
+    percentage.expenditure:HIV.AIDS + Total.expenditure:Income.composition.of.resources + 
+    Alcohol:Total.expenditure + Hepatitis.B:Measles + Status:Diphtheria + 
+    Adult.Mortality:Alcohol + Status:Alcohol + infant.deaths:Total.expenditure + 
+    HIV.AIDS:Schooling + Total.expenditure:Population + HIV.AIDS:thinness.5.9.years + 
+    percentage.expenditure:GDP + GDP:Schooling + Alcohol:GDP + 
+    Alcohol:Schooling + Adult.Mortality:Diphtheria + infant.deaths:Polio + 
+    infant.deaths:thinness.5.9.years + infant.deaths:Alcohol + 
+    Hepatitis.B:Diphtheria + Total.expenditure:thinness..1.19.years + 
+    thinness.5.9.years:Schooling + Diphtheria:thinness.5.9.years + 
+    Alcohol:Income.composition.of.resources + thinness..1.19.years:Income.composition.of.resources + 
+    Status:infant.deaths + Status:thinness..1.19.years + percentage.expenditure:thinness.5.9.years + 
+    Polio:Income.composition.of.resources + Status:Total.expenditure + 
+    Alcohol:Population + percentage.expenditure:Population + 
+    Hepatitis.B:thinness..1.19.years + infant.deaths:Hepatitis.B + 
+    Hepatitis.B:Total.expenditure + Total.expenditure:Diphtheria + 
+    infant.deaths:Income.composition.of.resources + Measles:Income.composition.of.resources + 
+    Status:Population + Adult.Mortality:BMI + percentage.expenditure:BMI + 
+    Alcohol:Polio + BMI:Polio + Polio:Diphtheria, data = training, 
+                 method = "lm", 
+                 preProc=c('scale', 'center'),
+                 trControl = control)
+lm_tunefor
+test_results$lm3 <- predict(lm_tunefor, testing)
+postResample(pred = test_results$lm3,  obs = test_results$Life.expectancy)
+
+qplot(test_results$lm3, test_results$Life.expectancy) + 
+  labs(title="Linear Regression Observed VS Predicted", x="Predicted", y="Observed") +
+  geom_abline(intercept = 0, slope = 1, colour = "blue") +
+  theme_bw()
+```
+
+```{r}
+importance <- varImp(lm_tune3, scale=FALSE)
+plot(importance,top=15)
+```
+
+
+## Feature Selection
+
+Multiple regression: done
+
+Stepwise Regression with AIC
+
+```{r}
+fit.step <- train(Life.expectancy ~ .,data=training, method='glmStepAIC',
+                  preProcess="scale", trControl=control, trace = FALSE) 
+importance <- varImp(fit.step, scale=FALSE)
+plot(importance)
+summary(fit.step$finalModel)
+```
+Elastic Net
+
+
+```{r}
+importance <- varImp(glmnet_tune, scale=FALSE)
+plot(importance)
+coef(glmnet_tune$finalModel, glmnet_tune$bestTune$lambda)[,1]
+```
+Lasso
+```{r}
+importance <- varImp(lasso_tune, scale=FALSE)
+plot(importance)
+```
+
+Recursive Feature Elimination
+
+With Random Forest
+```{r}
+modelRFE <- rfe(Life.expectancy ~ ., data=training, sizes=c(1:10), rfeControl=rfeControl(functions=rfFuncs, method="cv", number=10))
+print(modelRFE)
+predictors(modelRFE)
+ggplot(data = modelRFE, metric = "MAE") + theme_bw()
+```
+
+With treebagFuncs
+
+```{r}
+modelRFE <- rfe(Life.expectancy ~ ., data=training, sizes=c(1:19), rfeControl=rfeControl(functions=treebagFuncs, method="cv", number=10))
+print(modelRFE)
+predictors(modelRFE)
+ggplot(data = modelRFE, metric = "MAE") + theme_bw()
+```
+
+### Random Forest for variable selection
+
+```{r}
+fitRF <- train(Life.expectancy ~ .,data=training, method='rf', preProcess="scale", trControl=control) 
+importance <- varImp(fitRF, scale=FALSE)
+plot(importance)
+```
+
+
+### FOCI
+
+```{r}
+library(FOCI)
+library(Boruta)
+y <- training$Life.expectancy
+x <- training[,3:19]
+foci(y,x)$selectedVar
+```
+
+### Boruta
+```{r}
+boruta <- Boruta(Life.expectancy ~ ., data=training, doTrace=0)  
+plot(boruta, cex.axis=.7, las=2, xlab="", main="Variable Importance")
+```
+
+Comparing Models
+
+```{r}
+mods <- resamples(list(pls =pls_tune, elasticnet = glmnet_tune , lasso = lasso_tune))
+summary(mods)
+```
+
+
 
 
 
