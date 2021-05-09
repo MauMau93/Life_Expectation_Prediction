@@ -301,6 +301,7 @@ ggplot(corr,aes(x = row.names(corr), y = corr_life)) +
   theme(plot.title = element_text(hjust = 0, size = rel(1.5)),
         axis.text.x = element_text(angle = 45, hjust = 1))
 ```
+
 As we can see, the variable that has the strongest correlation is Schooling, income composition of resources, followed by BMI, and GDP. On the other hand, there are some variables that hold a strong negative correlation with our target, such as Adult mortality (logicaly), HIV (also logicaly) and other variables that are defined by illnesses that may cause death. The only variable that apparently has no correlation with life expectancy is "Population". Nevertheless, correlation does not necesarily imply causality, so we can not yet asses which of these predictors helps us best to predict life expectancy in a country.
 
 
@@ -340,6 +341,7 @@ Let´s check the dignostic plots to asses if the assumptions of the model are be
 ```{r}
 plot(fit.lm)
 ```
+
 As we can see in the plots, the residuals seem to be not very well centered around zero, and there is clearly some heterocedasticity (non constant variance). We can say that the lineality assumption is kind of violated here. For the most part, they seem to behave as gaussian (more or less) and there seems to be some possible outliers (although there are no points outside the red line, on the corners of the forth plot, there are some points that are close it).
 
 ```{r}
@@ -386,7 +388,7 @@ When using a gamma family for the glm, we get even a better result than when ass
 
 ### Robust Regression
 
-Now, I will perform two different robust regressions, with all the covariates I have
+Now, I will perform two different robust regressions, with all the covariates I have. Robust regression is a special kind of linear regression, where we give different weights to each point, assigned by a specific weighting function. I will use a Huber and a Bisquare to account for possible outliers:
 
 ```{r}
 linfit.huber <- rlm(Life.expectancy ~ . , data=training)
@@ -407,10 +409,149 @@ cor((testing$Life.expectancy), prBi)^2
 mean(abs((testing$Life.expectancy)- prBi))
 
 ```
+Here we get an interesting result. Our R sqaured are lower in comparison to what we got in our previous models, but we predict better in our testing set with both of them. Between them two, apparently the best model to predict is the one with huber function, although they both have very similar results.
+
+### Most important Variables
+
+Let´s try and get a more parsimonious model, when trying also to asses what is maybe the best model given our goal.
+
+First, let´s do a forward based ordinary least of squares regression:
+
+```{r}
+forwardpv <- ols_step_forward_p(fit.lm) # forward based on p-value
+plot(forwardpv)
+```
+```{r}
+forwardpv$model
+```
+As we can see, there are 15 variables taken here into account. Let´s see how it predictss:
+
+```{r}
+leap1 <- predict(forwardpv$model, newdata=testing)
+cor((testing$Life.expectancy), leap1)^2
+mean(abs((testing$Life.expectancy)- leap1))
+```
+Results are not better than the ones we already got, although they are close and with less variables used (has the highest R-squared yet but not the lowest MAE).
+
+Let´s now try using the AKAIKE criteria.
+
+First, let´s do forward based elimination, guiding by the AIC criterion:
+
+```{r}
+forwaic <- ols_step_forward_aic(fit.lm) # forward based on AIC
+forwaic$model
+forwpred <- predict(forwaic$model, newdata=testing)
+cor((testing$Life.expectancy), forwpred)^2
+mean(abs((testing$Life.expectancy)- forwpred))
+```
+
+Now, let´s do the same but with backward elimination, also guiding by the AIC criterion:
+
+```{r}
+backaic  <- ols_step_backward_aic(fit.lm) # backward AIC
+backaic$model
+backpred <- predict(backaic$model, newdata=testing)
+cor((testing$Life.expectancy), backpred)^2
+mean(abs((testing$Life.expectancy)- backpred))
+```
+
+As I get both with the backward and forward process of elimination the same result, there is no point in doing the bothsides step akaike elimination. In both cases, I get to a more parsimonious model in comparison with the one of full covariates, but we do not beat the previous models. Here we get an r-squared of 0.8381 and a Mean Absolute Error of 2.94.
+
+Nevertheless, I am interested in finding what happens when the same is done, but accounting for interactions. Now it is highly likely we will get a huge model with many terms, as I will try every possible two-sided interaction (again forward, backwards and both ways, always guided by AIC criterion).
+
+First forward:
+
+```{r,results="hide"}
+forwint <- step(fit.lm, scope = . ~ .^2, direction = 'forward')
+```
+
+```{r}
+summary(forwint)
+```
+As we suspected, we have a huge (and impossible to interpret) model, given all possible interactions. Nevertheless, our R-squares is at 0.9021, that is a great sign that shows us that we are accounting for more than 90% of the total variability in the dataset with this model. Let´s see how it predicts.
+
+```{r}
+test_results$forwint <- predict(forwint, testing)
+postResample(pred = test_results$forwint,  obs = test_results$Life.expectancy)
+```
+
+```{r}
+qplot(test_results$forwint, test_results$Life.expectancy) + 
+  labs(title="Linear Regression Observed VS Predicted", x="Predicted", y="Observed") +
+  geom_abline(intercept = 0, slope = 1, colour = "blue") +
+  theme_bw()
+```
+
+```{r,results="hide"}
+bothint <- step(fit.lm, scope = . ~ .^2, direction = 'both')
+```
 
 
+```{r}
+summary(bothint)
+test_results$bothint <- predict(bothint, testing)
+postResample(pred = test_results$bothint,  obs = test_results$Life.expectancy)
+```
+
+This is the best model until now both for predicting and for accounting for the variability of the data.
+
+I will define the model of bothsides with interaction, to use in Caret later for a better comparison.
+
+```{r}
+Model1 <- Life.expectancy ~ Status + Adult.Mortality + infant.deaths + 
+    Alcohol + percentage.expenditure + Hepatitis.B + Measles + 
+    BMI + Polio + Total.expenditure + Diphtheria + HIV.AIDS + 
+    GDP + Population + thinness..1.19.years + thinness.5.9.years + 
+    Income.composition.of.resources + Schooling + Adult.Mortality:HIV.AIDS + 
+    BMI:Diphtheria + thinness..1.19.years:thinness.5.9.years + 
+    percentage.expenditure:Income.composition.of.resources + 
+    Adult.Mortality:Schooling + BMI:Schooling + Income.composition.of.resources:Schooling + 
+    HIV.AIDS:Income.composition.of.resources + Alcohol:thinness..1.19.years + 
+    Status:Schooling + Status:Income.composition.of.resources + 
+    Total.expenditure:thinness..1.19.years + Status:Adult.Mortality + 
+    Measles:HIV.AIDS + Polio:Schooling + Diphtheria:Income.composition.of.resources + Alcohol:HIV.AIDS + Status:GDP + HIV.AIDS:GDP + percentage.expenditure:thinness..1.19.years + Status:BMI + Total.expenditure:HIV.AIDS + HIV.AIDS:Schooling + 
+    Adult.Mortality:Hepatitis.B + Measles:Total.expenditure + 
+    Status:Alcohol + infant.deaths:BMI + Alcohol:Schooling + 
+    Status:thinness..1.19.years + Status:Total.expenditure + 
+    Hepatitis.B:Measles + infant.deaths:Total.expenditure + Total.expenditure:Population + Alcohol:Population + Status:infant.deaths + Adult.Mortality:Alcohol + 
+    percentage.expenditure:GDP + BMI:GDP + Alcohol:percentage.expenditure + 
+    infant.deaths:thinness.5.9.years + Hepatitis.B:Diphtheria + 
+    Polio:Income.composition.of.resources + BMI:Polio + Alcohol:Polio + 
+    percentage.expenditure:Population + Hepatitis.B:HIV.AIDS + 
+    Diphtheria:HIV.AIDS + Alcohol:Total.expenditure + Total.expenditure:Income.composition.of.resources + 
+    Alcohol:Income.composition.of.resources + infant.deaths:Income.composition.of.resources + 
+    Measles:Income.composition.of.resources + Polio:Diphtheria + 
+    infant.deaths:GDP + Status:Population + Hepatitis.B:thinness..1.19.years + 
+    Hepatitis.B:thinness.5.9.years + Diphtheria:thinness..1.19.years + 
+    infant.deaths:Polio + Diphtheria:GDP + Status:Diphtheria + 
+    Measles:Polio
+```
+
+Let´s plot Observed vs. Predicted values
+
+```{r}
+qplot(test_results$bothint, test_results$Life.expectancy) + 
+  labs(title="Linear Regression Observed VS Predicted", x="Predicted", y="Observed") +
+  geom_abline(intercept = 0, slope = 1, colour = "blue") +
+  theme_bw()
+```
+
+Now, let´s see what are the most important variables, and the most important interactions according to this proceadure.
+
+```{r}
+modboth <- train(Model1, data = training, 
+                    method = "lm", 
+                    preProc=c('scale', 'center'),
+                    trControl = control)
+importance <- varImp(modboth, scale=FALSE)
+plot(importance,top=15)
+```
+
+As we can see, BMI seems to be now the most important variable and the most important interactions are "Adult Mortality:HIV", "BMI:Schooling". Until now, this is our best model for predicting life expectancy and accounting for the data variability. Nevertheless, it is a huge and impossible model to interpret.
 
 ### Forward Regression
+
+Let´s try with other options. First let´s do forward regression with Caret.
 
 ```{r}
 for_tune <- train(Life.expectancy ~ ., data = training, 
@@ -422,12 +563,14 @@ for_tune
 plot(for_tune)
 ```
 
+Now, let´s inspect which variables are selected and how well does this model perform:
+
 ```{r}
-# which variables are selected?
 coef(for_tune$finalModel, for_tune$bestTune$nvmax)
 test_results$frw <- predict(for_tune, testing)
 postResample(pred = test_results$frw,  obs = test_results$Life.expectancy)
 ```
+As it can be seen, this is not a great model, neither for the R-squared nor for the MAE or RMSE. We can see the Observed vs. Predicted values as it follows:
 
 ```{r}
 qplot(test_results$frw, test_results$Life.expectancy) + 
@@ -436,7 +579,9 @@ qplot(test_results$frw, test_results$Life.expectancy) +
   theme_bw()
 ```
 
-### backward Regression
+### Backward Regression
+
+Let´s now check with backward regression
 
 ```{r}
 back_tune <- train(Life.expectancy ~ ., data = training, 
@@ -447,13 +592,16 @@ back_tune <- train(Life.expectancy ~ ., data = training,
 back_tune
 plot(back_tune)
 ```
+
+Let´s see what variables have been selected and how the model performs:
+
 ```{r}
-# which variables are selected?
 coef(back_tune$finalModel, back_tune$bestTune$nvmax)
 test_results$bw <- predict(back_tune, testing)
 postResample(pred = test_results$bw,  obs = test_results$Life.expectancy)
 ```
 
+Here, we get pretty much the same result as with the forward regression. We can see it in the observed vs. predicted values plot (the similarities with the one before:
 
 ```{r}
 qplot(test_results$bw, test_results$Life.expectancy) + 
@@ -463,9 +611,9 @@ qplot(test_results$bw, test_results$Life.expectancy) +
 ```
 
 
-# some bias, very similar to lm
-
 ### Stepwise regression
+
+Let´s now check stepwise regression:
 
 ```{r}
 step_tune <- train(Life.expectancy ~ ., data = training, 
@@ -476,12 +624,15 @@ step_tune <- train(Life.expectancy ~ ., data = training,
 plot(step_tune)
 ```
 
+Let´s see which variables are selected and how the model performs:
+
 ```{r}
-# which variables are selected?
 coef(step_tune$finalModel, step_tune$bestTune$nvmax)
 test_results$seq <- predict(step_tune, testing)
 postResample(pred = test_results$seq,  obs = test_results$Life.expectancy)
 ```
+
+As it is seen here, we still get the same result (or almost the same one) in comparison with backward and forward regression. We can see it (again) in the plot of observed vs. predicted values in testing set:
 
 ```{r}
 qplot(test_results$seq, test_results$Life.expectancy) + 
@@ -490,7 +641,15 @@ qplot(test_results$seq, test_results$Life.expectancy) +
   theme_bw()
 ```
 
+## Regularization Method
+
 ### Ridge Regression
+
+Let´s try now with our first regularizatino method: Ridge regression. Now, a squared magnitude of the coefficient is added as the penalty term to the loss function. This is good to prevent overfitting. This regression has a parameter that has to be tunned: lambda.  If it is zero, then the equation will be the same as multiple linear regression. Instead, if the parameter is large, it will lead to under-fitting. 
+
+The bad thing about this regression is that is not useful for getting a parsimonious model, as it tends to shrink coefficient to near zero. So we can not do feature selection with it.
+
+Let´s run this regression, and see how it performs in general.
 
 ```{r}
 ridge_grid <- expand.grid(lambda = seq(0, .1, length = 20))
@@ -504,12 +663,14 @@ ridge_tune$bestTune
 test_results$ridge <- predict(ridge_tune, testing)
 postResample(pred = test_results$ridge,  obs = test_results$Life.expectancy)
 ```
+As we can see, our lambda parameter is pretty small and this may explain why we get similar performance in comparison to the multiple linear regression.
 
-```{r}
-coef(ridge_tune$finalModel, ridge_tune$bestTune$lambda)
-```
 
 ### Lasso
+
+Lasso (least absolute shrinkage and selection operator) performs also regularization. This time, the absolute value of the magnitude of the coefficient is added as the penalty term to the loss funcion. As some variable coefficient can be zero, we can perform feature selection with it.
+
+Here, we also have a tunning parameter: lambda. Let´s see this model performance:
 
 ```{r}
 lasso_grid <- expand.grid(fraction = seq(.01, 1, length = 20))
@@ -525,6 +686,19 @@ postResample(pred = test_results$lasso,  obs = test_results$Life.expectancy)
 
 ```
 
+Again, we get very similar results as with Rdige regression and multiple linear regression. Let´s check the variable importante to get some interpretation of what is happening.
+
+```{r}
+importance <- varImp(lasso_tune, scale=FALSE)
+plot(importance)
+```
+
+### Elastic Net
+
+Elastic net regression that combines, in a linear way, lasso regression and ridge regression (their penalties). 
+
+Let´s see if it performs better, although is highly probable it will provide us with a very similar result of the other two.
+
 ```{r}
 modelLookup('glmnet')
 elastic_grid = expand.grid(alpha = seq(0, .2, 0.01), lambda = seq(0, .1, 0.01))
@@ -538,11 +712,26 @@ glmnet_tune$bestTune
 test_results$glmnet <- predict(glmnet_tune, testing)
 postResample(pred = test_results$glmnet,  obs = test_results$Life.expectancy)
 ```
+
+We get a slightly lower MAE and the same R-squared value as we got in the previous ones.
+
+We can check the value of each coefficient:
+
 ```{r}
 coef(glmnet_tune$finalModel, glmnet_tune$bestTune$lambda)
 ```
 
+Let´s see what variables are the most important according to this method:
+
+```{r}
+importance <- varImp(glmnet_tune, scale=FALSE)
+plot(importance)
+coef(glmnet_tune$finalModel, glmnet_tune$bestTune$lambda)[,1]
+```
+
 ### Principal Component Regression
+
+Let´s do another kind of regression now: principal component regression. Let´s see how it performs:
 
 ```{r}
 pcr_tune <- train(Life.expectancy ~ . , data = training,
@@ -555,7 +744,13 @@ test_results$pcr <- predict(pcr_tune, testing)
 postResample(pred = test_results$pcr,  obs = test_results$Life.expectancy)
 
 ```
-### PLS
+
+Here we get a worse result even than before. Our R-squared has gone down to 0.8290 and our MAE is up to 3.06, so this model is worse both for accounting variability of the dataset and also for predicting.
+
+### Partial Least Square Regression (PLS)
+
+Now we will do something similar as PCR, but we will find a linear regression by projecting the predicted values and the observable variables to a new space. Let´s see what happens when we run it:
+
 
 ```{r}
 pls_tune <- train(Life.expectancy ~ . , data = training,
@@ -566,7 +761,85 @@ pls_tune <- train(Life.expectancy ~ . , data = training,
 plot(pls_tune)
 test_results$pls <- predict(pls_tune, testing)
 postResample(pred = test_results$pls,  obs = test_results$Life.expectancy)
+
 ```
+
+As we can see, our results are not that bad now. We get a R-square measure 0.8386 and a MAE of 2.927 (and a RMSE of 3.86).
+
+
+
+## Some different approaches
+
+Now, we can try and see with different approaches the most important variables in our dataset. First let´s do Recursive Feature Elimination.
+
+
+### Recursive Feature Elimination
+
+
+Here, we can use a different function in order to select a different algorithm. I will use: random forest and bagging of trees.
+
+First with Random Forest:
+
+```{r}
+modelRFE <- rfe(Life.expectancy ~ ., data=training, sizes=c(1:19), rfeControl=rfeControl(functions=rfFuncs, method="cv", number=10))
+print(modelRFE)
+predictors(modelRFE)
+ggplot(data = modelRFE, metric = "MAE") + theme_bw()
+```
+
+Here the result is interesting. According to this approach, the top 5 variables are "HIV", "Income Composition of resources", "Alcohol" and "BMI". Let´s see what happens when we do the same but with the function calling for bagging.
+
+Second, with treebagFuncs:
+
+```{r}
+modelRFE <- rfe(Life.expectancy ~ ., data=training, sizes=c(1:19), rfeControl=rfeControl(functions=treebagFuncs, method="cv", number=10))
+print(modelRFE)
+predictors(modelRFE)
+ggplot(data = modelRFE, metric = "MAE") + theme_bw()
+```
+
+Now the result is different. According to this, the most important variable is "Adult Mortality", while "HIV" and "BMI" are also included. It is a similar result, although now the top variable is different. 
+
+### Random Forest for variable selection
+
+We can use random forest algorithm to meassure the importance of each variable in predicting the output. Let´s see:
+
+```{r}
+fitRF <- train(Life.expectancy ~ .,data=training, method='rf', preProcess="scale", trControl=control) 
+importance <- varImp(fitRF, scale=FALSE)
+plot(importance)
+```
+
+Now the important variables are the same, but in a different order. First we have "income composition of resources" (or HDI), followed by "HIV", "Adult Mortality" and "Schooling". In particular, is interesting how the variable "Schooling" is so important to predict the life expectation in a country, as its relationship with the amount of years that someone lives is not straightforward. It is probable that the more educated someone is, the more opportunities of having a better life and thus, live more years. 
+
+### FOCI
+
+Let´s see what FOCI has to say about the variable importance.
+
+```{r}
+y <- training$Life.expectancy
+x <- training[,3:19]
+foci(y,x)$selectedVar
+```
+
+Now, through FUCI, we get the same important variables, although now Thinness from 1-9 years seems to be important, as well as infant deaths and thinness from 5-9 years old. Now HIV is not the most important one, nor the second one.
+
+### Boruta
+
+Boruta is another algorithm to help us check what are the most important variables:
+
+```{r}
+boruta <- Boruta(Life.expectancy ~ ., data=training, doTrace=0)  
+plot(boruta, cex.axis=.7, las=2, xlab="", main="Variable Importance")
+```
+
+Comparing Models
+
+```{r}
+mods <- resamples(list(pls =bothint, elasticnet = glmnet_tune , lasso = lasso_tune))
+summary(mods)
+```
+
 ```{r}
 apply(test_results[-1], 2, function(x) cor(x,test_results$Life.expectancy)^2)
 apply(test_results[-1], 2, function(x) mean(abs(x - test_results$Life.expectancy)))
@@ -580,161 +853,6 @@ test_results %>%
 test_results$comb = (test_results$lasso + test_results$ridge + test_results$pls)/3
 postResample(pred = test_results$comb,  obs = test_results$Life.expectancy)
 ```
-### Model Selection
-
-```{r}
-forwardpv <- ols_step_forward_p(fit.lm) # forward based on p-value
-
-plot(ols_step_forward_p(fit.lm))
-
-```
-
-Akaike Criterion
-
-```{r}
-ols_step_forward_aic(fit.lm) # forward based on AIC
-
-stepaicback <- ols_step_backward_aic(fit.lm) # backward AIC
-
-ols_step_both_aic(fit.lm) # stepwise AIC
-```
-
-Let´s see what happens once we add two side interactions:
-
-```{r,results=HIDE}
-forwint <- step(fit.lm, scope = . ~ .^2, direction = 'forward')
-backint <- step(fit.lm, scope = . ~ .^2, direction = 'backward')
-bothint <- step(fit.lm, scope = . ~ .^2, direction = 'both')
-```
-
-```{r}
-lm_tunefor <- train(Life.expectancy ~ Status + Adult.Mortality + infant.deaths + 
-    Alcohol + percentage.expenditure + Hepatitis.B + Measles + 
-    BMI + Polio + Total.expenditure + Diphtheria + HIV.AIDS + 
-    GDP + Population + thinness..1.19.years + thinness.5.9.years + 
-    Income.composition.of.resources + Schooling + Adult.Mortality:HIV.AIDS + 
-    thinness..1.19.years:thinness.5.9.years + percentage.expenditure:Income.composition.of.resources + 
-    BMI:Diphtheria + Income.composition.of.resources:Schooling + 
-    BMI:Schooling + Adult.Mortality:Schooling + BMI:Total.expenditure + 
-    HIV.AIDS:Income.composition.of.resources + Alcohol:thinness.5.9.years + 
-    Status:Schooling + Status:Income.composition.of.resources + 
-    Status:Adult.Mortality + Total.expenditure:HIV.AIDS + Alcohol:HIV.AIDS + 
-    Status:BMI + Status:GDP + infant.deaths:BMI + Measles:HIV.AIDS + 
-    Diphtheria:Schooling + Diphtheria:Income.composition.of.resources + 
-    percentage.expenditure:HIV.AIDS + Total.expenditure:Income.composition.of.resources + 
-    Alcohol:Total.expenditure + Hepatitis.B:Measles + Status:Diphtheria + 
-    Adult.Mortality:Alcohol + Status:Alcohol + infant.deaths:Total.expenditure + 
-    HIV.AIDS:Schooling + Total.expenditure:Population + HIV.AIDS:thinness.5.9.years + 
-    percentage.expenditure:GDP + GDP:Schooling + Alcohol:GDP + 
-    Alcohol:Schooling + Adult.Mortality:Diphtheria + infant.deaths:Polio + 
-    infant.deaths:thinness.5.9.years + infant.deaths:Alcohol + 
-    Hepatitis.B:Diphtheria + Total.expenditure:thinness..1.19.years + 
-    thinness.5.9.years:Schooling + Diphtheria:thinness.5.9.years + 
-    Alcohol:Income.composition.of.resources + thinness..1.19.years:Income.composition.of.resources + 
-    Status:infant.deaths + Status:thinness..1.19.years + percentage.expenditure:thinness.5.9.years + 
-    Polio:Income.composition.of.resources + Status:Total.expenditure + 
-    Alcohol:Population + percentage.expenditure:Population + 
-    Hepatitis.B:thinness..1.19.years + infant.deaths:Hepatitis.B + 
-    Hepatitis.B:Total.expenditure + Total.expenditure:Diphtheria + 
-    infant.deaths:Income.composition.of.resources + Measles:Income.composition.of.resources + 
-    Status:Population + Adult.Mortality:BMI + percentage.expenditure:BMI + 
-    Alcohol:Polio + BMI:Polio + Polio:Diphtheria, data = training, 
-                 method = "lm", 
-                 preProc=c('scale', 'center'),
-                 trControl = control)
-lm_tunefor
-test_results$lm3 <- predict(lm_tunefor, testing)
-postResample(pred = test_results$lm3,  obs = test_results$Life.expectancy)
-
-qplot(test_results$lm3, test_results$Life.expectancy) + 
-  labs(title="Linear Regression Observed VS Predicted", x="Predicted", y="Observed") +
-  geom_abline(intercept = 0, slope = 1, colour = "blue") +
-  theme_bw()
-```
-
-```{r}
-importance <- varImp(lm_tune3, scale=FALSE)
-plot(importance,top=15)
-```
-
-
-## Feature Selection
-
-Multiple regression: done
-
-Stepwise Regression with AIC
-
-```{r}
-fit.step <- train(Life.expectancy ~ .,data=training, method='glmStepAIC',
-                  preProcess="scale", trControl=control, trace = FALSE) 
-importance <- varImp(fit.step, scale=FALSE)
-plot(importance)
-summary(fit.step$finalModel)
-```
-Elastic Net
-
-
-```{r}
-importance <- varImp(glmnet_tune, scale=FALSE)
-plot(importance)
-coef(glmnet_tune$finalModel, glmnet_tune$bestTune$lambda)[,1]
-```
-Lasso
-```{r}
-importance <- varImp(lasso_tune, scale=FALSE)
-plot(importance)
-```
-
-Recursive Feature Elimination
-
-With Random Forest
-```{r}
-modelRFE <- rfe(Life.expectancy ~ ., data=training, sizes=c(1:10), rfeControl=rfeControl(functions=rfFuncs, method="cv", number=10))
-print(modelRFE)
-predictors(modelRFE)
-ggplot(data = modelRFE, metric = "MAE") + theme_bw()
-```
-
-With treebagFuncs
-
-```{r}
-modelRFE <- rfe(Life.expectancy ~ ., data=training, sizes=c(1:19), rfeControl=rfeControl(functions=treebagFuncs, method="cv", number=10))
-print(modelRFE)
-predictors(modelRFE)
-ggplot(data = modelRFE, metric = "MAE") + theme_bw()
-```
-
-### Random Forest for variable selection
-
-```{r}
-fitRF <- train(Life.expectancy ~ .,data=training, method='rf', preProcess="scale", trControl=control) 
-importance <- varImp(fitRF, scale=FALSE)
-plot(importance)
-```
-
-
-### FOCI
-
-```{r}
-y <- training$Life.expectancy
-x <- training[,3:19]
-foci(y,x)$selectedVar
-```
-
-### Boruta
-```{r}
-boruta <- Boruta(Life.expectancy ~ ., data=training, doTrace=0)  
-plot(boruta, cex.axis=.7, las=2, xlab="", main="Variable Importance")
-```
-
-Comparing Models
-
-```{r}
-mods <- resamples(list(pls =pls_tune, elasticnet = glmnet_tune , lasso = lasso_tune))
-summary(mods)
-```
-
-
 
 
 
