@@ -216,18 +216,7 @@ As I will be using CARET to model and predict my target variable, there is no ne
 
 Let´s start to asses the relationship between the variables in the dataset.
 
-
-```{r}
-options(repr.plot.width = 20, repr.plot.height = 16)
-coord <- ggparcoord(datos, columns=2:19, alphaLines=0.1, missing = 'mean',
-                 groupColumn = 'Life.expectancy', scale="uniminmax") + 
-xlab("") +
-ylab("")
-coord
-```
-
-
-Let´s check the autocorrelation between the variables.
+First, let´s check the autocorrelation between the variables.
 
 ```{r}
 correlation <- corrplot(cor(dato[,2:20]),type="upper",method="circle",title="Correlation plot",mar=c(0.1,0.1,0.1,0.1))
@@ -797,7 +786,10 @@ Here, we can use a different function in order to select a different algorithm. 
 First with Random Forest:
 
 ```{r}
-modelRFE <- rfe(Life.expectancy ~ ., data=training, sizes=c(1:19), rfeControl=rfeControl(functions=rfFuncs, method="cv", number=10))
+modelRFE <- rfe(Life.expectancy ~ ., data=training, sizes=c(1:19), rfeControl=rfeControl(functions=rfFuncs, method="cv", number=5))
+```
+
+```{r}
 print(modelRFE)
 predictors(modelRFE)
 ggplot(data = modelRFE, metric = "MAE") + theme_bw()
@@ -808,7 +800,10 @@ Here the result is interesting. According to this approach, the top 5 variables 
 Second, with treebagFuncs:
 
 ```{r}
-modelRFE <- rfe(Life.expectancy ~ ., data=training, sizes=c(1:19), rfeControl=rfeControl(functions=treebagFuncs, method="cv", number=10))
+modelRFE <- rfe(Life.expectancy ~ ., data=training, sizes=c(1:19), rfeControl=rfeControl(functions=treebagFuncs, method="cv", number=5))
+```
+
+```{r}
 print(modelRFE)
 predictors(modelRFE)
 ggplot(data = modelRFE, metric = "MAE") + theme_bw()
@@ -821,7 +816,10 @@ Now the result is different. According to this, the most important variable is "
 We can use random forest algorithm to meassure the importance of each variable in predicting the output. Let´s see:
 
 ```{r}
-fitRF <- train(Life.expectancy ~ .,data=training, method='rf', preProcess="scale", trControl=control) 
+fitRF <- train(Life.expectancy ~ .,data=training, method='rf', preProcess="scale", trControl=control)
+```
+
+```{r}
 importance <- varImp(fitRF, scale=FALSE)
 plot(importance)
 ```
@@ -974,14 +972,6 @@ mean(df$out==1)
 ```
 As we can see, only 4.6% of the predictions are outside the interval.
 
-```{r}
-ggplot(df, aes(x=yhat2, y=y2))+
-  geom_point(aes(color=out)) + theme(legend.position="none") +
-  xlim(20, 100) + ylim(20, 100)+
-  geom_ribbon(data=predictions,aes(ymin=lwr,ymax=upr),alpha=0.3) +
-  labs(title = "Prediction intervals", x = "prediction",y="real life expectancy")
-```
-
 Now, this is even more robust:
 
 ```{r}
@@ -994,13 +984,8 @@ df <- data.frame(y2,yhat2,lwr,upr)
 
 df = df %>% mutate(out=factor(if_else(y2<lwr | y2>upr,1,0)))
 mean(df$out==1)
-
-ggplot(df, aes(x=yhat2, y=y2))+
-  geom_point(aes(color=out)) + theme(legend.position="none") +
-  xlim(20, 100) + ylim(20, 100)+
-  geom_ribbon(data=predictions,aes(ymin=lwr,ymax=upr),alpha=0.3) +
-  labs(title = "Prediction intervals", x = "prediction",y="real life expectancy")
 ```
+
 Now, only 2% of the predictions are outside the interval. This is a very good interval then.
 
 
